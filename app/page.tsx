@@ -1,50 +1,51 @@
-import Link from "next/link";
-import SnsApps from "@/components/SnsApps";
+"use client";
+
+import { useState } from "react";
+import StakeProgramFlow from "@/components/workflow/StakeProgramFlow";
+import StakePoolFlow from "@/components/workflow/StakePoolFlow";
+import StakeNetFlow from "@/components/workflow/StakeNetFlow";
+
+const tabs = [
+  { id: 0, label: "Stake Program" },
+  { id: 1, label: "SPL Stake Pool" },
+  { id: 2, label: "Jito StakeNet" },
+];
 
 export default function Home() {
+  const [tabValue, setTabValue] = useState(0);
+
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 mt-20">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Aoi Kurokawa</h1>
-        <hr className="border-gray-700 mb-6" />
-        <p className="text-2xl mb-6">
-          Hi, I&apos;m Aoi. An adventurous traveler, and dog-lover.
-        </p>
+    <div className="max-w-7xl mx-auto px-6 py-8 mt-20">
+      <h1 className="text-3xl font-bold text-center mb-2">
+        Solana Staking Workflows
+      </h1>
+      <p className="text-gray-400 text-center mb-8">
+        Interactive visualization of Stake Program, Stake Pool, and StakeNet
+        workflows
+      </p>
+
+      <div className="border-b border-gray-700 mb-6">
+        <div className="flex justify-center gap-8">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setTabValue(tab.id)}
+              className={`pb-4 px-2 text-sm font-medium transition-colors ${
+                tabValue === tab.id
+                  ? "border-b-2 border-blue-400 text-blue-400"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="space-y-6 text-lg">
-        <p>
-          I&apos;m currently a student, studying computer science. I also go by
-          Full Stack Developer, Front-End Developer, or Back-End Developer.
-        </p>
-        <p>
-          For my personal interest, I like blockchain, web3.0 technologies. I
-          have joined some projects such as watch NFT project, video NFT
-          project. My task was mainly developing user interface by front-end
-          frameworks such as ReactJS, NextJS.
-        </p>
-        <p>
-          You can find some projects that I have joined before and my personal
-          projects{" "}
-          <Link href="/works" className="underline hover:text-gray-400">
-            here.
-          </Link>
-        </p>
-        <p>
-          You can find my resume{" "}
-          <a
-            href="https://github.com/Aoi1011/resume/blob/main/AOI%20KUROKAWA.pdf"
-            target="_blank"
-            rel="noreferrer"
-            className="underline hover:text-gray-400"
-          >
-            here.
-          </a>
-        </p>
-      </div>
-
-      <div className="mt-12">
-        <SnsApps />
+      <div className="py-4">
+        {tabValue === 0 && <StakeProgramFlow />}
+        {tabValue === 1 && <StakePoolFlow />}
+        {tabValue === 2 && <StakeNetFlow />}
       </div>
     </div>
   );

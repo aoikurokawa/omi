@@ -10,14 +10,7 @@ export default function Header() {
         >
           OMI Stake
         </Link>
-        <div className="flex items-center gap-8">
-          <Link
-            href="/workflow"
-            className="text-gray-400 hover:text-white text-sm font-medium uppercase tracking-wide transition-colors"
-          >
-            Workflow
-          </Link>
-        </div>
+        <div className="flex items-center gap-8"></div>
       </nav>
     </header>
   );
