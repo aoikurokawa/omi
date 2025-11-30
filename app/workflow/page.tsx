@@ -1,75 +1,52 @@
 "use client";
 
 import { useState } from "react";
-import Container from "@mui/material/Container";
-import Box from "@mui/material/Box";
-import Tabs from "@mui/material/Tabs";
-import Tab from "@mui/material/Tab";
-import Typography from "@mui/material/Typography";
 import StakeProgramFlow from "@/components/workflow/StakeProgramFlow";
 import StakePoolFlow from "@/components/workflow/StakePoolFlow";
 import StakeNetFlow from "@/components/workflow/StakeNetFlow";
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`workflow-tabpanel-${index}`}
-      aria-labelledby={`workflow-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
-    </div>
-  );
-}
+const tabs = [
+  { id: 0, label: "Stake Program" },
+  { id: 1, label: "SPL Stake Pool" },
+  { id: 2, label: "Jito StakeNet" },
+];
 
 export default function WorkflowPage() {
   const [tabValue, setTabValue] = useState(0);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
   return (
-    <Container sx={{ py: 4, mt: 10 }} maxWidth="xl">
-      <Typography variant="h3" component="h1" gutterBottom align="center">
+    <div className="max-w-7xl mx-auto px-6 py-8 mt-20">
+      <h1 className="text-3xl font-bold text-center mb-2">
         Solana Staking Workflows
-      </Typography>
-      <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
-        Interactive visualization of Stake Program, Stake Pool, and StakeNet workflows
-      </Typography>
+      </h1>
+      <p className="text-gray-400 text-center mb-8">
+        Interactive visualization of Stake Program, Stake Pool, and StakeNet
+        workflows
+      </p>
 
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          aria-label="workflow tabs"
-          centered
-        >
-          <Tab label="Stake Program" />
-          <Tab label="SPL Stake Pool" />
-          <Tab label="Jito StakeNet" />
-        </Tabs>
-      </Box>
+      <div className="border-b border-gray-700 mb-6">
+        <div className="flex justify-center gap-8">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setTabValue(tab.id)}
+              className={`pb-4 px-2 text-sm font-medium transition-colors ${
+                tabValue === tab.id
+                  ? "border-b-2 border-blue-400 text-blue-400"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <TabPanel value={tabValue} index={0}>
-        <StakeProgramFlow />
-      </TabPanel>
-      <TabPanel value={tabValue} index={1}>
-        <StakePoolFlow />
-      </TabPanel>
-      <TabPanel value={tabValue} index={2}>
-        <StakeNetFlow />
-      </TabPanel>
-    </Container>
+      <div className="py-4">
+        {tabValue === 0 && <StakeProgramFlow />}
+        {tabValue === 1 && <StakePoolFlow />}
+        {tabValue === 2 && <StakeNetFlow />}
+      </div>
+    </div>
   );
 }

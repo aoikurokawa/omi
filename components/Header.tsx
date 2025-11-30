@@ -1,62 +1,24 @@
-"use client";
-
 import Link from "next/link";
-import AppBar from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import Typography from "@mui/material/Typography";
-import Grid from "@mui/material/Grid";
-import Box from "@mui/material/Box";
 
 export default function Header() {
   return (
-    <Box sx={{ flexGrow: 1 }}>
-      <AppBar position="fixed">
-        <Toolbar
-          sx={{
-            backgroundColor: "#000000",
-            borderBottom: "1px solid",
-          }}
+    <header className="fixed top-0 left-0 right-0 z-50 bg-[#111] border-b border-gray-800">
+      <nav className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
+        <Link
+          href="/"
+          className="text-white text-xl font-bold hover:text-gray-300 transition-colors"
         >
-          <Grid container spacing={3}>
-            <Grid item sm={3} sx={{ display: "flex", alignItems: "center" }}>
-              <Typography variant="h5">
-                <Link
-                  href="/"
-                  style={{
-                    outline: "none",
-                    color: "#ffffff",
-                    padding: "1rem",
-                    textDecoration: "none",
-                  }}
-                >
-                  OMI Stake
-                </Link>
-              </Typography>
-            </Grid>
-            <Grid
-              item
-              sm={6}
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-evenly",
-              }}
-            >
-              <Typography variant="button">
-                <Link
-                  href="/workflow"
-                  style={{
-                    color: "rgba(255,255,255,0.7)",
-                    textDecoration: "none",
-                  }}
-                >
-                  WORKFLOW
-                </Link>
-              </Typography>
-            </Grid>
-          </Grid>
-        </Toolbar>
-      </AppBar>
-    </Box>
+          OMI Stake
+        </Link>
+        <div className="flex items-center gap-8">
+          <Link
+            href="/workflow"
+            className="text-gray-400 hover:text-white text-sm font-medium uppercase tracking-wide transition-colors"
+          >
+            Workflow
+          </Link>
+        </div>
+      </nav>
+    </header>
   );
 }

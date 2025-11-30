@@ -13,152 +13,91 @@ import {
   Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
 
 interface NodeData {
   label: string;
   description?: string;
   color?: string;
   borderColor?: string;
-  textColor?: string;
   items?: string[];
 }
 
 function ProgramNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={4}
-      sx={{
-        p: 2,
-        minWidth: 220,
-        textAlign: "center",
-        bgcolor: data.color || "#fff",
-        border: "3px solid",
-        borderColor: data.borderColor || "#1976d2",
-        borderRadius: 2,
+    <div
+      className="p-4 min-w-[220px] text-center rounded-lg shadow-lg"
+      style={{
+        backgroundColor: data.color || "#fff",
+        border: `3px solid ${data.borderColor || "#1976d2"}`,
       }}
     >
       <Handle type="target" position={Position.Top} />
       <Handle type="target" position={Position.Left} id="left" />
-      <Typography
-        variant="subtitle1"
-        fontWeight="bold"
-        sx={{ color: data.textColor || "inherit" }}
-      >
-        {data.label}
-      </Typography>
+      <p className="font-semibold">{data.label}</p>
       {data.description && (
-        <Typography
-          variant="caption"
-          display="block"
-          color="text.secondary"
-          sx={{ mt: 0.5 }}
-        >
-          {data.description}
-        </Typography>
+        <p className="text-xs text-gray-500 mt-1">{data.description}</p>
       )}
       <Handle type="source" position={Position.Bottom} />
       <Handle type="source" position={Position.Right} id="right" />
-    </Paper>
+    </div>
   );
 }
 
 function DataNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={2}
-      sx={{
-        p: 1.5,
-        minWidth: 160,
-        textAlign: "center",
-        bgcolor: data.color || "#f5f5f5",
-        border: "2px solid",
-        borderColor: data.borderColor || "#666",
-        borderRadius: 1,
+    <div
+      className="p-3 min-w-40 text-center rounded"
+      style={{
+        backgroundColor: data.color || "#f5f5f5",
+        border: `2px solid ${data.borderColor || "#666"}`,
       }}
     >
       <Handle type="target" position={Position.Top} />
       <Handle type="target" position={Position.Left} id="left" />
-      <Typography variant="caption" fontWeight="bold">
-        {data.label}
-      </Typography>
+      <p className="font-semibold text-xs">{data.label}</p>
       {data.items && (
-        <Box sx={{ mt: 0.5, textAlign: "left" }}>
-          {data.items.map((item: string, i: number) => (
-            <Typography
-              key={i}
-              variant="caption"
-              display="block"
-              color="text.secondary"
-              sx={{ fontSize: 9 }}
-            >
+        <div className="mt-1 text-left">
+          {data.items.map((item, i) => (
+            <p key={i} className="text-[9px] text-gray-500">
               • {item}
-            </Typography>
+            </p>
           ))}
-        </Box>
+        </div>
       )}
       <Handle type="source" position={Position.Bottom} />
       <Handle type="source" position={Position.Right} id="right" />
-    </Paper>
+    </div>
   );
 }
 
 function ProcessNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={2}
-      sx={{
-        p: 1,
-        minWidth: 140,
-        textAlign: "center",
-        bgcolor: data.color || "#fff",
-        border: "2px solid",
-        borderColor: data.borderColor || "#666",
-        borderRadius: "20px",
+    <div
+      className="p-2 min-w-[140px] text-center rounded-full"
+      style={{
+        backgroundColor: data.color || "#fff",
+        border: `2px solid ${data.borderColor || "#666"}`,
       }}
     >
       <Handle type="target" position={Position.Top} />
       <Handle type="target" position={Position.Left} id="left" />
-      <Typography variant="caption" fontWeight="bold">
-        {data.label}
-      </Typography>
+      <p className="font-semibold text-xs">{data.label}</p>
       {data.description && (
-        <Typography
-          variant="caption"
-          display="block"
-          color="text.secondary"
-          sx={{ fontSize: 10 }}
-        >
-          {data.description}
-        </Typography>
+        <p className="text-[10px] text-gray-500">{data.description}</p>
       )}
       <Handle type="source" position={Position.Bottom} />
       <Handle type="source" position={Position.Right} id="right" />
-    </Paper>
+    </div>
   );
 }
 
 function KeeperNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={3}
-      sx={{
-        p: 1.5,
-        minWidth: 120,
-        textAlign: "center",
-        bgcolor: "#fff8e1",
-        border: "2px dashed #ff9800",
-        borderRadius: "50%",
-      }}
-    >
+    <div className="p-3 min-w-[120px] text-center rounded-full bg-yellow-50 border-2 border-dashed border-orange-400">
       <Handle type="target" position={Position.Left} id="left" />
-      <Typography variant="caption" fontWeight="bold" sx={{ color: "#e65100" }}>
-        {data.label}
-      </Typography>
+      <p className="font-semibold text-xs text-orange-700">{data.label}</p>
       <Handle type="source" position={Position.Right} id="right" />
-    </Paper>
+    </div>
   );
 }
 
@@ -170,7 +109,6 @@ const nodeTypes = {
 };
 
 const initialNodes: Node[] = [
-  // Main Programs
   {
     id: "validator-history",
     type: "program",
@@ -204,7 +142,6 @@ const initialNodes: Node[] = [
       borderColor: "#ff9800",
     },
   },
-  // Validator History Data
   {
     id: "vh-data",
     type: "data",
@@ -233,7 +170,6 @@ const initialNodes: Node[] = [
       items: ["3 years of data", "All validators"],
     },
   },
-  // Steward Data
   {
     id: "steward-config",
     type: "data",
@@ -256,7 +192,6 @@ const initialNodes: Node[] = [
       items: ["Validator scores", "Delegations", "State machine"],
     },
   },
-  // Processes
   {
     id: "compute-score",
     type: "process",
@@ -290,7 +225,6 @@ const initialNodes: Node[] = [
       borderColor: "#f44336",
     },
   },
-  // Keepers
   {
     id: "keeper-1",
     type: "keeper",
@@ -309,7 +243,6 @@ const initialNodes: Node[] = [
     position: { x: 50, y: 720 },
     data: { label: "Keeper N" },
   },
-  // Validators
   {
     id: "validators",
     type: "data",
@@ -321,7 +254,6 @@ const initialNodes: Node[] = [
       items: ["Increase stake", "Decrease stake", "Auto-add validators"],
     },
   },
-  // JitoSOL
   {
     id: "jitosol",
     type: "program",
@@ -333,7 +265,6 @@ const initialNodes: Node[] = [
       borderColor: "#e91e63",
     },
   },
-  // Scoring criteria box
   {
     id: "scoring",
     type: "data",
@@ -354,7 +285,6 @@ const initialNodes: Node[] = [
 ];
 
 const initialEdges: Edge[] = [
-  // Validator History to Steward
   {
     id: "e-vh-steward",
     source: "validator-history",
@@ -366,7 +296,6 @@ const initialEdges: Edge[] = [
     markerEnd: { type: MarkerType.ArrowClosed, color: "#4caf50" },
     label: "metrics",
   },
-  // Steward to Stake Pool
   {
     id: "e-steward-pool",
     source: "steward",
@@ -378,7 +307,6 @@ const initialEdges: Edge[] = [
     markerEnd: { type: MarkerType.ArrowClosed, color: "#1976d2" },
     label: "CPI",
   },
-  // Data connections
   {
     id: "e-vh-data",
     source: "validator-history",
@@ -403,7 +331,6 @@ const initialEdges: Edge[] = [
     target: "steward-state",
     style: { stroke: "#1976d2" },
   },
-  // Process connections
   {
     id: "e-data-score",
     source: "vh-data",
@@ -441,7 +368,6 @@ const initialEdges: Edge[] = [
     target: "instant-unstake",
     style: { stroke: "#9c27b0" },
   },
-  // Keeper connections
   {
     id: "e-keeper1-score",
     source: "keeper-1",
@@ -466,7 +392,6 @@ const initialEdges: Edge[] = [
     targetHandle: "left",
     style: { stroke: "#ff9800", strokeDasharray: "5,5" },
   },
-  // Pool connections
   {
     id: "e-pool-validators",
     source: "stake-pool",
@@ -486,7 +411,6 @@ const initialEdges: Edge[] = [
     target: "jitosol",
     style: { stroke: "#e91e63" },
   },
-  // Scoring criteria
   {
     id: "e-score-criteria",
     source: "compute-score",
@@ -500,20 +424,23 @@ export default function StakeNetFlow() {
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
 
   return (
-    <Box>
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h5" gutterBottom>
-          Jito StakeNet
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold mb-1">Jito StakeNet</h2>
+        <p className="text-sm text-gray-400 mb-1">
           Validator History:{" "}
-          <code>HistoryJTGbKQD2mRgLZ3XhqHnN811Qpez8X9kCcGHoa</code>
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Steward: <code>Stewardf95sJbmtcZsyagb2dg4Mo8eVQho8gpECvLx8</code>
-        </Typography>
-      </Box>
-      <Box sx={{ height: 800, border: "1px solid #e0e0e0", borderRadius: 2 }}>
+          <code className="bg-gray-800 px-1 rounded">
+            HistoryJTGbKQD2mRgLZ3XhqHnN811Qpez8X9kCcGHoa
+          </code>
+        </p>
+        <p className="text-sm text-gray-400">
+          Steward:{" "}
+          <code className="bg-gray-800 px-1 rounded">
+            Stewardf95sJbmtcZsyagb2dg4Mo8eVQho8gpECvLx8
+          </code>
+        </p>
+      </div>
+      <div className="h-[800px] border border-gray-700 rounded-lg bg-[#1a1a1a]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -524,68 +451,31 @@ export default function StakeNetFlow() {
           attributionPosition="bottom-left"
         >
           <Controls />
-          <Background color="#f5f5f5" gap={16} />
+          <Background color="#333" gap={16} />
         </ReactFlow>
-      </Box>
-      <Box sx={{ mt: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#e8f5e9",
-              border: "2px solid #4caf50",
-            }}
-          />
-          <Typography variant="caption">Validator History</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#e3f2fd",
-              border: "2px solid #1976d2",
-            }}
-          />
-          <Typography variant="caption">Steward</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#fff3e0",
-              border: "2px solid #ff9800",
-            }}
-          />
-          <Typography variant="caption">Stake Pool</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#f3e5f5",
-              border: "2px solid #9c27b0",
-              borderRadius: "10px",
-            }}
-          />
-          <Typography variant="caption">Process</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#fff8e1",
-              border: "2px dashed #ff9800",
-              borderRadius: "50%",
-            }}
-          />
-          <Typography variant="caption">Keeper</Typography>
-        </Paper>
-      </Box>
-    </Box>
+      </div>
+      <div className="mt-4 flex gap-3 flex-wrap">
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-green-900/50 border-2 border-green-500" />
+          <span className="text-xs text-gray-300">Validator History</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-blue-900/50 border-2 border-blue-500" />
+          <span className="text-xs text-gray-300">Steward</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-orange-900/50 border-2 border-orange-500" />
+          <span className="text-xs text-gray-300">Stake Pool</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-purple-900/50 border-2 border-purple-500 rounded-full" />
+          <span className="text-xs text-gray-300">Process</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-yellow-900/50 border-2 border-dashed border-orange-400 rounded-full" />
+          <span className="text-xs text-gray-300">Keeper</span>
+        </div>
+      </div>
+    </div>
   );
 }

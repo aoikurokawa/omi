@@ -13,9 +13,6 @@ import {
   Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
 
 interface NodeData {
   label: string;
@@ -27,65 +24,38 @@ interface NodeData {
 
 function StepNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={3}
-      sx={{
-        p: 2,
-        minWidth: 180,
-        textAlign: "center",
-        bgcolor: data.color || "#fff",
-        border: "2px solid",
-        borderColor: data.borderColor || "#1976d2",
-        borderRadius: 2,
+    <div
+      className="p-4 min-w-[180px] text-center rounded-lg shadow-md"
+      style={{
+        backgroundColor: data.color || "#fff",
+        border: `2px solid ${data.borderColor || "#1976d2"}`,
       }}
     >
       <Handle type="target" position={Position.Top} />
-      <Typography
-        variant="subtitle2"
-        fontWeight="bold"
-        sx={{ color: data.textColor || "inherit" }}
+      <p
+        className="font-semibold text-sm"
+        style={{ color: data.textColor || "inherit" }}
       >
         {data.label}
-      </Typography>
+      </p>
       {data.description && (
-        <Typography variant="caption" display="block" color="text.secondary">
-          {data.description}
-        </Typography>
+        <p className="text-xs text-gray-500 mt-1">{data.description}</p>
       )}
       <Handle type="source" position={Position.Bottom} />
-    </Paper>
+    </div>
   );
 }
 
 function AuthorityNode({ data }: { data: NodeData }) {
   return (
-    <Paper
-      elevation={2}
-      sx={{
-        p: 1.5,
-        minWidth: 150,
-        textAlign: "center",
-        bgcolor: "#fff3e0",
-        border: "2px dashed #ff9800",
-        borderRadius: 2,
-      }}
-    >
+    <div className="p-3 min-w-[150px] text-center rounded-lg bg-orange-50 border-2 border-dashed border-orange-400">
       <Handle type="target" position={Position.Left} />
-      <Typography variant="caption" fontWeight="bold" sx={{ color: "#e65100" }}>
-        {data.label}
-      </Typography>
+      <p className="font-semibold text-xs text-orange-700">{data.label}</p>
       {data.description && (
-        <Typography
-          variant="caption"
-          display="block"
-          color="text.secondary"
-          sx={{ fontSize: 10 }}
-        >
-          {data.description}
-        </Typography>
+        <p className="text-[10px] text-gray-500 mt-1">{data.description}</p>
       )}
       <Handle type="source" position={Position.Right} />
-    </Paper>
+    </div>
   );
 }
 
@@ -95,7 +65,6 @@ const nodeTypes = {
 };
 
 const initialNodes: Node[] = [
-  // Main flow
   {
     id: "create",
     type: "step",
@@ -184,7 +153,6 @@ const initialNodes: Node[] = [
       borderColor: "#9c27b0",
     },
   },
-  // Authorities
   {
     id: "stake-authority",
     type: "authority",
@@ -203,7 +171,6 @@ const initialNodes: Node[] = [
       description: "Withdraw funds, change authorities",
     },
   },
-  // Side operations
   {
     id: "split",
     type: "step",
@@ -277,7 +244,6 @@ const initialEdges: Edge[] = [
     animated: true,
     style: { stroke: "#ffc107" },
   },
-  // Authority connections
   {
     id: "e-stake-auth",
     source: "stake-authority",
@@ -292,7 +258,6 @@ const initialEdges: Edge[] = [
     style: { stroke: "#ff9800", strokeDasharray: "5,5" },
     markerEnd: { type: MarkerType.ArrowClosed, color: "#ff9800" },
   },
-  // Side operations
   {
     id: "e-split",
     source: "active",
@@ -314,16 +279,17 @@ export default function StakeProgramFlow() {
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
 
   return (
-    <Box>
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h5" gutterBottom>
-          Native Stake Program
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Program ID: <code>Stake11111111111111111111111111111111111111</code>
-        </Typography>
-      </Box>
-      <Box sx={{ height: 800, border: "1px solid #e0e0e0", borderRadius: 2 }}>
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold mb-1">Native Stake Program</h2>
+        <p className="text-sm text-gray-400">
+          Program ID:{" "}
+          <code className="bg-gray-800 px-1 rounded">
+            Stake11111111111111111111111111111111111111
+          </code>
+        </p>
+      </div>
+      <div className="h-[800px] border border-gray-700 rounded-lg bg-[#1a1a1a]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -334,55 +300,27 @@ export default function StakeProgramFlow() {
           attributionPosition="bottom-left"
         >
           <Controls />
-          <Background color="#f5f5f5" gap={16} />
+          <Background color="#333" gap={16} />
         </ReactFlow>
-      </Box>
-      <Box sx={{ mt: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#e3f2fd",
-              border: "2px solid #1976d2",
-            }}
-          />
-          <Typography variant="caption">Setup</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#e8f5e9",
-              border: "2px solid #4caf50",
-            }}
-          />
-          <Typography variant="caption">Active</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#fff8e1",
-              border: "2px solid #ffc107",
-            }}
-          />
-          <Typography variant="caption">Waiting</Typography>
-        </Paper>
-        <Paper sx={{ p: 1, display: "flex", alignItems: "center", gap: 1 }}>
-          <Box
-            sx={{
-              width: 16,
-              height: 16,
-              bgcolor: "#fff3e0",
-              border: "2px dashed #ff9800",
-            }}
-          />
-          <Typography variant="caption">Authority</Typography>
-        </Paper>
-      </Box>
-    </Box>
+      </div>
+      <div className="mt-4 flex gap-3 flex-wrap">
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-blue-900/50 border-2 border-blue-500" />
+          <span className="text-xs text-gray-300">Setup</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-green-900/50 border-2 border-green-500" />
+          <span className="text-xs text-gray-300">Active</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-yellow-900/50 border-2 border-yellow-500" />
+          <span className="text-xs text-gray-300">Waiting</span>
+        </div>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-orange-900/50 border-2 border-dashed border-orange-400" />
+          <span className="text-xs text-gray-300">Authority</span>
+        </div>
+      </div>
+    </div>
   );
 }

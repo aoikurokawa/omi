@@ -1,11 +1,11 @@
-"use client";
-
-import { AppRouterCacheProvider } from "@mui/material-nextjs/v14-appRouter";
-import { ThemeProvider, createTheme } from "@mui/material/styles";
-import CssBaseline from "@mui/material/CssBaseline";
+import type { Metadata } from "next";
+import "./globals.css";
 import Header from "@/components/Header";
 
-const theme = createTheme();
+export const metadata: Metadata = {
+  title: "Aoi Kurokawa",
+  description: "Portfolio website",
+};
 
 export default function RootLayout({
   children,
@@ -13,21 +13,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          fontFamily:
-            '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-        }}
-      >
-        <AppRouterCacheProvider>
-          <ThemeProvider theme={theme}>
-            <CssBaseline />
-            <Header />
-            <main style={{ paddingBottom: "80px" }}>{children}</main>
-          </ThemeProvider>
-        </AppRouterCacheProvider>
+    <html lang="en" className="dark">
+      <body className="min-h-screen bg-[#0a0a0a] text-gray-100">
+        <Header />
+        <main className="pb-20">{children}</main>
       </body>
     </html>
   );
