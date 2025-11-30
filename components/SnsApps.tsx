@@ -38,7 +38,7 @@ export default function SnsApps() {
           href={sns.link}
           target="_blank"
           rel="noreferrer"
-          className="text-4xl text-gray-700 hover:text-black transition-colors cursor-pointer"
+          className="text-4xl text-gray-400 hover:text-white transition-colors cursor-pointer"
           aria-label={sns.name}
         >
           <sns.icon />

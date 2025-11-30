@@ -6,7 +6,7 @@ export default function Home() {
     <div className="max-w-4xl mx-auto px-6 py-8 mt-20">
       <div className="text-center">
         <h1 className="text-4xl font-bold mb-4">Aoi Kurokawa</h1>
-        <hr className="border-gray-300 mb-6" />
+        <hr className="border-gray-700 mb-6" />
         <p className="text-2xl mb-6">
           Hi, I&apos;m Aoi. An adventurous traveler, and dog-lover.
         </p>
@@ -26,7 +26,7 @@ export default function Home() {
         <p>
           You can find some projects that I have joined before and my personal
           projects{" "}
-          <Link href="/works" className="underline hover:text-gray-600">
+          <Link href="/works" className="underline hover:text-gray-400">
             here.
           </Link>
         </p>
@@ -36,7 +36,7 @@ export default function Home() {
             href="https://github.com/Aoi1011/resume/blob/main/AOI%20KUROKAWA.pdf"
             target="_blank"
             rel="noreferrer"
-            className="underline hover:text-gray-600"
+            className="underline hover:text-gray-400"
           >
             here.
           </a>

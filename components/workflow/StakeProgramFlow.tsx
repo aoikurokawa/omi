@@ -282,14 +282,14 @@ export default function StakeProgramFlow() {
     <div>
       <div className="mb-4">
         <h2 className="text-xl font-semibold mb-1">Native Stake Program</h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-400">
           Program ID:{" "}
-          <code className="bg-gray-100 px-1 rounded">
+          <code className="bg-gray-800 px-1 rounded">
             Stake11111111111111111111111111111111111111
           </code>
         </p>
       </div>
-      <div className="h-[800px] border border-gray-200 rounded-lg">
+      <div className="h-[800px] border border-gray-700 rounded-lg bg-[#1a1a1a]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -300,25 +300,25 @@ export default function StakeProgramFlow() {
           attributionPosition="bottom-left"
         >
           <Controls />
-          <Background color="#f5f5f5" gap={16} />
+          <Background color="#333" gap={16} />
         </ReactFlow>
       </div>
       <div className="mt-4 flex gap-3 flex-wrap">
-        <div className="flex items-center gap-2 px-2 py-1 bg-white rounded shadow-sm">
-          <div className="w-4 h-4 bg-blue-50 border-2 border-blue-500" />
-          <span className="text-xs">Setup</span>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-blue-900/50 border-2 border-blue-500" />
+          <span className="text-xs text-gray-300">Setup</span>
         </div>
-        <div className="flex items-center gap-2 px-2 py-1 bg-white rounded shadow-sm">
-          <div className="w-4 h-4 bg-green-50 border-2 border-green-500" />
-          <span className="text-xs">Active</span>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-green-900/50 border-2 border-green-500" />
+          <span className="text-xs text-gray-300">Active</span>
         </div>
-        <div className="flex items-center gap-2 px-2 py-1 bg-white rounded shadow-sm">
-          <div className="w-4 h-4 bg-yellow-50 border-2 border-yellow-500" />
-          <span className="text-xs">Waiting</span>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-yellow-900/50 border-2 border-yellow-500" />
+          <span className="text-xs text-gray-300">Waiting</span>
         </div>
-        <div className="flex items-center gap-2 px-2 py-1 bg-white rounded shadow-sm">
-          <div className="w-4 h-4 bg-orange-50 border-2 border-dashed border-orange-400" />
-          <span className="text-xs">Authority</span>
+        <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded border border-gray-700">
+          <div className="w-4 h-4 bg-orange-900/50 border-2 border-dashed border-orange-400" />
+          <span className="text-xs text-gray-300">Authority</span>
         </div>
       </div>
     </div>

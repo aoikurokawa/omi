@@ -19,12 +19,12 @@ export default function WorkflowPage() {
       <h1 className="text-3xl font-bold text-center mb-2">
         Solana Staking Workflows
       </h1>
-      <p className="text-gray-600 text-center mb-8">
+      <p className="text-gray-400 text-center mb-8">
         Interactive visualization of Stake Program, Stake Pool, and StakeNet
         workflows
       </p>
 
-      <div className="border-b border-gray-200 mb-6">
+      <div className="border-b border-gray-700 mb-6">
         <div className="flex justify-center gap-8">
           {tabs.map((tab) => (
             <button
@@ -32,8 +32,8 @@ export default function WorkflowPage() {
               onClick={() => setTabValue(tab.id)}
               className={`pb-4 px-2 text-sm font-medium transition-colors ${
                 tabValue === tab.id
-                  ? "border-b-2 border-blue-500 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "border-b-2 border-blue-400 text-blue-400"
+                  : "text-gray-500 hover:text-gray-300"
               }`}
             >
               {tab.label}
