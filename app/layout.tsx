@@ -3,8 +3,8 @@ import "./globals.css";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
-  title: "Aoi Kurokawa",
-  description: "Portfolio website",
+  title: "Omi Stake",
+  description: "Omi Stake",
 };
 
 export default function RootLayout({
