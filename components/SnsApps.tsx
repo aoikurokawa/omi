@@ -1,22 +1,8 @@
-import { Grid } from "@material-ui/core";
-import { FaMedium, FaLinkedin, FaGithub, FaTwitter } from "react-icons/fa";
-import { createStyles, makeStyles, Theme } from "@material-ui/core/styles";
-import { Button } from "@mui/material";
+"use client";
 
-const useStyles = makeStyles((theme: Theme) =>
-  createStyles({
-    loginContainer: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-around",
-      fontSize: "3rem",
-      width: "100%",
-      [theme.breakpoints.up("sm")]: {
-        padding: "0 20rem",
-      },
-    },
-  })
-);
+import Grid from "@mui/material/Grid";
+import Button from "@mui/material/Button";
+import { FaMedium, FaLinkedin, FaGithub, FaTwitter } from "react-icons/fa";
 
 const snses = [
   {
@@ -46,17 +32,24 @@ const snses = [
 ];
 
 export default function SnsApps() {
-  const classes = useStyles();
-
   const handleClick = (link: string) => {
     window.open(link, "_blank")?.focus();
   };
 
   return (
-    <Grid className={classes.loginContainer}>
+    <Grid
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-around",
+        fontSize: "3rem",
+        width: "100%",
+        padding: { sm: "0 20rem" },
+      }}
+    >
       {snses.map((sns) => (
         <div key={sns.id} onClick={() => handleClick(sns.link)}>
-          <Button style={{ fontSize: "3rem" }}>{sns.icon}</Button>
+          <Button sx={{ fontSize: "3rem" }}>{sns.icon}</Button>
         </div>
       ))}
     </Grid>
