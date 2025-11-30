@@ -18,11 +18,7 @@ export default function Header() {
           }}
         >
           <Grid container spacing={3}>
-            <Grid
-              item
-              sm={3}
-              sx={{ display: "flex", alignItems: "center" }}
-            >
+            <Grid item sm={3} sx={{ display: "flex", alignItems: "center" }}>
               <Typography variant="h5">
                 <Link
                   href="/"
@@ -33,7 +29,7 @@ export default function Header() {
                     textDecoration: "none",
                   }}
                 >
-                  AOI
+                  OMI Stake
                 </Link>
               </Typography>
             </Grid>
@@ -48,18 +44,13 @@ export default function Header() {
             >
               <Typography variant="button">
                 <Link
-                  href="/works"
-                  style={{ color: "rgba(255,255,255,0.7)", textDecoration: "none" }}
+                  href="/workflow"
+                  style={{
+                    color: "rgba(255,255,255,0.7)",
+                    textDecoration: "none",
+                  }}
                 >
-                  WORKS
-                </Link>
-              </Typography>
-              <Typography variant="button">
-                <Link
-                  href="/aboutme"
-                  style={{ color: "rgba(255,255,255,0.7)", textDecoration: "none" }}
-                >
-                  ABOUT ME
+                  WORKFLOW
                 </Link>
               </Typography>
             </Grid>
