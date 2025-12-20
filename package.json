@@ -9,7 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@mdx-js/loader": "^3.1.1",
+    "@mdx-js/react": "^3.1.1",
     "@xyflow/react": "^12.9.3",
+    "fumadocs-core": "^13.4.10",
+    "fumadocs-mdx": "^10.0.2",
+    "fumadocs-ui": "^13.4.10",
     "markdown-to-jsx": "^7.3.0",
     "next": "14.2.0",
     "react": "^18.2.0",

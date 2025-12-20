@@ -1,0 +1,207 @@
+---
+title: Jito StakeNet
+description: Automated validator management with Steward Program
+---
+
+# Jito StakeNet
+
+Jito StakeNet is an advanced system for **automated stake delegation** based on validator performance. It consists of the Validator History program and the Steward Program.
+
+## Interactive Visualization
+
+<StakeNetFlow />
+
+## System Overview
+
+StakeNet answers a critical question: **How do you decide which validators to stake with?**
+
+Instead of manual selection, StakeNet:
+1. Collects validator performance data on-chain
+2. Scores validators using objective metrics
+3. Automatically adjusts stake distribution
+4. Runs as a fully on-chain, permissionless system
+
+## Validator History Program
+
+The Validator History program stores **512 epochs of historical data** for each validator.
+
+### Data Collected
+
+| Metric | Source | Description |
+|--------|--------|-------------|
+| Vote Credits | Gossip | Voting performance per epoch |
+| Commission | Gossip | Validator fee percentage |
+| MEV Commission | Jito API | MEV reward sharing |
+| Superminority | RPC | Whether in top 33% of stake |
+| Stake | RPC | Total delegated stake |
+| Epoch Credits | Vote Account | Credits earned |
+
+### Architecture
+
+```
+Off-Chain Keepers
+       │
+       ▼
+┌──────────────────┐
+│ Validator History │ ◄── One account per validator
+│    Program        │     512 epoch circular buffer
+└──────────────────┘
+```
+
+### Keeper Operations
+
+The **VH Keeper** uploads data each epoch:
+
+```rust
+// Upload vote credits from gossip
+copy_vote_account(&validator_history, &vote_account)
+
+// Upload MEV commission from Jito API  
+update_mev_commission(&validator_history, mev_commission)
+
+// Upload cluster info
+update_stake_history(&validator_history, stake, rank)
+```
+
+## Steward Program
+
+The Steward Program uses Validator History data to **automatically manage stake distribution** for a stake pool.
+
+### Scoring Algorithm
+
+Each validator receives a score based on:
+
+```
+score = (
+    vote_credits_ratio * CREDITS_WEIGHT +
+    mev_commission_score * MEV_WEIGHT +
+    commission_score * COMMISSION_WEIGHT +
+    superminority_penalty
+)
+```
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| **Config** | Scoring parameters and thresholds |
+| **State** | Current scoring state machine phase |
+| **Delegations** | Target stake for each validator |
+
+### State Machine
+
+The Steward runs as a **state machine** each epoch:
+
+```
+┌─────────────┐
+│   Compute   │ ◄── Calculate scores for all validators
+│   Scores    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│   Compute   │ ◄── Determine target stake distribution
+│ Delegations │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│    Idle     │ ◄── Wait for cranks to rebalance
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Rebalance  │ ◄── Adjust stake to match targets
+└─────────────┘
+```
+
+### Delegation Strategy
+
+The Steward determines how much stake each validator should receive:
+
+```rust
+// Validators are sorted by score
+// Top validators receive more stake
+// Stake is distributed proportionally
+
+for validator in sorted_validators {
+    if validator.score >= threshold {
+        target_stake = calculate_share(validator.score, total_stake);
+        delegations[validator] = target_stake;
+    }
+}
+```
+
+### Rebalancing
+
+The **Steward Keeper** cranks rebalancing operations:
+
+```rust
+// For validators needing more stake
+increase_validator_stake(&stake_pool, &validator, additional_stake)
+
+// For validators needing less stake  
+decrease_validator_stake(&stake_pool, &validator, stake_to_remove)
+```
+
+## Integration with Stake Pool
+
+StakeNet controls an SPL Stake Pool:
+
+```
+┌────────────────┐      Control      ┌─────────────────┐
+│    Steward     │ ─────────────────►│  SPL Stake Pool │
+│    Program     │                   │   (JitoSOL)     │
+└────────────────┘                   └────────┬────────┘
+                                              │
+                                              │ CPI
+                                              ▼
+                                     ┌─────────────────┐
+                                     │  Stake Program  │
+                                     └─────────────────┘
+```
+
+The Steward:
+1. Is set as the **staker authority** of the stake pool
+2. Calls `increase_validator_stake` and `decrease_validator_stake`
+3. Makes all delegation decisions programmatically
+
+## Key Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **Decentralized** | No single entity decides stake distribution |
+| **Objective** | Scores based on measurable performance |
+| **Transparent** | All data and logic on-chain |
+| **Automated** | No manual intervention needed |
+| **Permissionless** | Anyone can run keepers |
+
+## Keeper Infrastructure
+
+Two keepers maintain the system:
+
+### VH Keeper
+- Runs every epoch
+- Uploads validator metrics to Validator History
+- Sources: Gossip, Jito API, RPC
+
+### Steward Keeper
+- Runs after VH Keeper
+- Cranks state machine transitions
+- Executes rebalancing operations
+
+```bash
+# Example keeper commands
+vh-keeper upload-all --epoch 500
+steward-keeper crank --compute-scores
+steward-keeper crank --compute-delegations
+steward-keeper rebalance --validator <pubkey>
+```
+
+## Instant Unstaking
+
+For instant unstaking, users can:
+1. Swap JitoSOL → SOL on Jupiter/other DEXs
+2. Use dedicated unstaking pools with reserve liquidity
+
+The LST maintains its peg through arbitrage opportunities.

@@ -10,7 +10,14 @@ export default function Header() {
         >
           OMI Stake
         </Link>
-        <div className="flex items-center gap-8"></div>
+        <div className="flex items-center gap-8">
+          <Link
+            href="/docs"
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            Docs
+          </Link>
+        </div>
       </nav>
     </header>
   );
