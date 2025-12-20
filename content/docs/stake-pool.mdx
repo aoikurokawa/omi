@@ -1,0 +1,192 @@
+---
+title: SPL Stake Pool
+description: Liquid staking on Solana with stake pools
+---
+
+# SPL Stake Pool
+
+The SPL Stake Pool program enables **liquid staking** on Solana. Users deposit SOL and receive liquid staking tokens (LSTs) that represent their share of the pool.
+
+## Interactive Visualization
+
+<StakePoolFlow />
+
+## How It Works
+
+### The Problem with Native Staking
+
+Native staking has limitations:
+- **Illiquidity**: SOL is locked during staking
+- **Long unstaking**: 2-3 day cooldown period
+- **Single validator**: Each stake account delegates to one validator
+- **No DeFi**: Can't use staked SOL in other protocols
+
+### The Stake Pool Solution
+
+Stake pools solve these by:
+1. Pooling SOL from many users
+2. Distributing stake across multiple validators
+3. Issuing liquid tokens representing pool shares
+4. Enabling instant "unstaking" via token swaps
+
+## Pool Architecture
+
+### Key Accounts
+
+| Account | Purpose |
+|---------|---------|
+| **Stake Pool** | Main pool state, tracks total stake and token supply |
+| **Validator List** | List of validators the pool delegates to |
+| **Reserve** | Holds unstaked SOL for withdrawals |
+| **Pool Token Mint** | The LST mint (e.g., JitoSOL, mSOL) |
+
+### Authorities
+
+| Authority | Role |
+|-----------|------|
+| **Manager** | Add/remove validators, set fees |
+| **Staker** | Increase/decrease validator stake |
+| **Deposit Authority** | (Optional) Restrict who can deposit |
+| **Withdraw Authority** | Program-derived, controls stake accounts |
+
+## User Operations
+
+### Deposit SOL
+
+```rust
+// User deposits 10 SOL
+deposit_sol(
+    &stake_pool,
+    &user_wallet,
+    &user_token_account,
+    10 * LAMPORTS_PER_SOL,
+)
+// User receives pool tokens based on current exchange rate
+```
+
+The exchange rate is:
+```
+pool_tokens = deposit_amount * total_pool_tokens / total_pool_stake
+```
+
+### Deposit Stake
+
+Users can also deposit existing stake accounts:
+
+```rust
+deposit_stake(
+    &stake_pool,
+    &validator_stake_account,
+    &user_stake_account,
+    &user_token_account,
+)
+```
+
+### Withdraw
+
+Users burn pool tokens to receive SOL or stake:
+
+```rust
+withdraw_sol(
+    &stake_pool,
+    &user_token_account,
+    &user_wallet,
+    pool_tokens_to_burn,
+)
+```
+
+## Validator Management
+
+### Adding Validators
+
+The manager adds validators to the pool:
+
+```rust
+add_validator_to_pool(
+    &stake_pool,
+    &validator_vote_account,
+)
+```
+
+### Stake Distribution
+
+The staker authority distributes stake among validators:
+
+```rust
+// Increase stake to a validator
+increase_validator_stake(
+    &stake_pool,
+    &validator_stake_account,
+    lamports_to_add,
+)
+
+// Decrease stake from a validator
+decrease_validator_stake(
+    &stake_pool,
+    &validator_stake_account,
+    lamports_to_remove,
+)
+```
+
+## Epoch Maintenance
+
+Each epoch, the pool must be updated:
+
+### 1. Update Validator List
+
+```rust
+update_validator_list_balance(
+    &stake_pool,
+    &validator_list,
+    start_index,
+    no_merge,
+)
+```
+
+This updates each validator's recorded stake balance.
+
+### 2. Update Pool Balance
+
+```rust
+update_stake_pool_balance(&stake_pool)
+```
+
+This recalculates:
+- Total stake in the pool
+- New exchange rate (including rewards)
+
+### 3. Cleanup Removed Validators
+
+```rust
+cleanup_removed_validator_entries(&stake_pool)
+```
+
+## Fee Structure
+
+Stake pools can charge fees:
+
+| Fee Type | Description |
+|----------|-------------|
+| **Epoch Fee** | Percentage of rewards each epoch |
+| **Withdrawal Fee** | Fee on withdrawals |
+| **Deposit Fee** | Fee on deposits |
+| **Referral Fee** | Share of deposit fee for referrers |
+
+## Transient Stake Accounts
+
+When increasing or decreasing validator stake, the pool uses **transient stake accounts**:
+
+1. **Increasing**: SOL moves from reserve → transient → validator stake
+2. **Decreasing**: Stake moves from validator → transient → reserve
+
+This is necessary because stake accounts need warmup/cooldown periods.
+
+## Why Liquid Staking?
+
+| Benefit | Explanation |
+|---------|-------------|
+| **Liquidity** | Trade LSTs instantly on DEXs |
+| **DeFi Composability** | Use LSTs as collateral, in LPs, etc. |
+| **Diversification** | Stake spread across many validators |
+| **Instant Unstaking** | Swap LST → SOL without waiting |
+| **Auto-compounding** | Rewards automatically increase LST value |

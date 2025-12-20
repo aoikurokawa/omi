@@ -347,7 +347,7 @@ export default function StakePoolFlow() {
           </code>
         </p>
       </div>
-      <div className="h-[700px] border border-gray-700 rounded-lg bg-[#1a1a1a]">
+      <div className="h-[60vh] border border-gray-700 rounded-lg bg-[#1a1a1a]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
