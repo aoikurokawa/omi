@@ -1,13 +1,22 @@
 {
   "title": "Instructions",
   "pages": [
-    "initialize",
-    "delegate",
-    "deactivate",
-    "withdraw",
-    "split-merge",
-    "authorize",
-    "move",
-    "lockup"
+    "0_initialize",
+    "1_authorize",
+    "2_delegate_stake",
+    "3_split",
+    "4_withdraw",
+    "5_deactivate",
+    "6_set_lockup",
+    "7_merge",
+    "8_authorize_with_seed",
+    "9_initialize_checked",
+    "10_authorize_checked",
+    "11_authorize_checked_with_seed",
+    "12_set_lockup_checked",
+    "13_get_minimum_delegation",
+    "14_deactivate_delinquent",
+    "15_move_stake",
+    "16_move_lamports"
   ]
 }

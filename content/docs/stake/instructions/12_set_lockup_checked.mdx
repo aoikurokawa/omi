@@ -1,0 +1,160 @@
+---
+title: SetLockupChecked
+description: Set lockup with additional verification that the new custodian signs.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 12 |
+| Estimated CU | ~9,100 |
+
+Identical to `SetLockup`, but if setting a new custodian, that custodian must also sign.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to modify |
+| 1 | Authority | ❌ | ✅ | Withdraw authority or lockup custodian |
+| 2 | New Custodian | ❌ | ✅ | (Optional) New custodian must sign |
+
+## Arguments
+
+```rust
+pub struct LockupCheckedArgs {
+    pub unix_timestamp: Option<i64>,
+    pub epoch: Option<Epoch>,
+    // Note: custodian is passed as an account, not in args
+}
+```
+
+## Example
+
+```typescript
+// Set new custodian with their consent
+const setLockupCheckedIx = StakeProgram.setLockupChecked({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: currentCustodian.publicKey,
+  lockup: {
+    unixTimestamp: thirtyDaysFromNow,
+    epoch: null,
+  },
+  newCustodianPubkey: newCustodian.publicKey, // Must also sign
+});
+
+const tx = new Transaction().add(setLockupCheckedIx);
+await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  currentCustodian,
+  newCustodian, // Required signature
+]);
+```
+
+---
+
+## Checking Lockup Status
+
+```typescript
+async function checkLockupStatus(
+  connection: Connection,
+  stakeAccount: PublicKey
+): Promise<{
+  isLocked: boolean;
+  unlockDate?: Date;
+  unlockEpoch?: number;
+  custodian?: PublicKey;
+}> {
+  const accountInfo = await connection.getParsedAccountInfo(stakeAccount);
+  const lockup = accountInfo.value?.data.parsed.info.meta.lockup;
+  
+  const now = Math.floor(Date.now() / 1000);
+  const epochInfo = await connection.getEpochInfo();
+  
+  const timestampLocked = lockup.unixTimestamp > now;
+  const epochLocked = lockup.epoch > epochInfo.epoch;
+  const isLocked = timestampLocked || epochLocked;
+  
+  return {
+    isLocked,
+    unlockDate: lockup.unixTimestamp > 0 
+      ? new Date(lockup.unixTimestamp * 1000) 
+      : undefined,
+    unlockEpoch: lockup.epoch > 0 ? lockup.epoch : undefined,
+    custodian: new PublicKey(lockup.custodian),
+  };
+}
+
+// Usage
+const status = await checkLockupStatus(connection, stakeAccountPubkey);
+if (status.isLocked) {
+  console.log('Account is locked');
+  if (status.unlockDate) {
+    console.log('Unlocks at:', status.unlockDate);
+  }
+  if (status.unlockEpoch) {
+    console.log('Unlocks at epoch:', status.unlockEpoch);
+  }
+} else {
+  console.log('Account is unlocked, can withdraw freely');
+}
+```
+
+---
+
+## Use Cases
+
+### Vesting Schedule
+
+```typescript
+// Create stake with 1-year lockup
+const oneYearFromNow = Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60);
+
+const initIx = StakeProgram.initialize({
+  stakePubkey: stakeAccount.publicKey,
+  authorized: {
+    staker: employee.publicKey,
+    withdrawer: employee.publicKey,
+  },
+  lockup: {
+    unixTimestamp: oneYearFromNow,
+    epoch: 0,
+    custodian: employer.publicKey, // Employer can modify/cancel
+  },
+});
+```
+
+### Escrow Protection
+
+```typescript
+// Lock stake until a specific epoch (e.g., after a governance vote)
+const governanceEpoch = 550;
+
+const lockupIx = StakeProgram.setLockup({
+  stakePubkey: escrowStake,
+  authorizedPubkey: escrowAuthority.publicKey,
+  lockup: {
+    unixTimestamp: 0,
+    epoch: governanceEpoch,
+    custodian: governanceMultisig,
+  },
+});
+```
+
+---
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `CustodianMissing` | Lockup active but custodian not provided |
+| `MissingRequiredSignature` | Required signer not present |
+| `InvalidAccountData` | Account not a valid stake account |
+
+## Notes
+
+- Lockup does not prevent delegation, deactivation, or authority changes
+- Lockup only restricts withdrawal operations
+- Setting both timestamp and epoch to 0 effectively removes the lockup
+- The custodian can always override or remove the lockup
