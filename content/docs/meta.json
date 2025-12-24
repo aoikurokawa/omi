@@ -1,4 +1,4 @@
 {
   "title": "Solana Staking",
-  "pages": ["index", "stake-program", "stake-pool", "stakenet"]
+  "pages": ["index", "stake", "stake-pool", "stakenet"]
 }
