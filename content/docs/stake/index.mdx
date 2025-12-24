@@ -1,139 +1,161 @@
 ---
 title: Introduction
-description: Understanding Solana's native staking program
+description: Solana's native staking program
 ---
 
-# Stake Program
+The Solana Stake Program enables SOL holders to participate in network security by delegating tokens to validators. Delegators earn rewards proportional to their stake while helping decentralize the network.
 
-The Stake Program is Solana's native on-chain program for staking SOL to validators. It's the foundation of Solana's Proof-of-Stake consensus mechanism.
+| Property | Value |
+|----------|-------|
+| Program Address | `Stake11111111111111111111111111111111111111` |
+| License | Apache-2.0 |
+| Source | [github.com/solana-program/stake](https://github.com/solana-program/stake) |
 
-## Interactive Visualization
+## Key Features
 
-<StakeProgramFlow />
+- **Stake Delegation**: Delegate SOL to validators to earn rewards
+- **Flexible Management**: Split, merge, and transfer stake between accounts
+- **Security Controls**: Separate stake and withdraw authorities for granular access
+- **Lockup Support**: Optional time-based withdrawal restrictions
+- **Permissionless Deactivation**: Anyone can deactivate stake from delinquent validators
 
-## Stake Account Lifecycle
+## Architecture
 
-A stake account goes through several states during its lifetime:
+The Stake Program was originally a native program built into the Agave validator client. It has been ported to BPF (Berkeley Packet Filter) format, allowing any validator implementation to execute it consistently. This BPF version is live on all Solana clusters.
 
-### 1. Create & Initialize
-
-First, you create a stake account and initialize it with authorities:
-
-- **Stake Authority**: Can delegate, deactivate, and split the stake
-- **Withdraw Authority**: Can withdraw funds from the stake account
-
-```rust
-// Create stake account
-let stake_account = Keypair::new();
-let lamports = rent + stake_amount;
-
-create_account(
-    &payer,
-    &stake_account,
-    lamports,
-    StakeState::size_of(),
-    &stake::program::id(),
-)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Stake Account                           │
+├─────────────────────────────────────────────────────────────┤
+│  Meta                                                       │
+│  ├── rent_exempt_reserve: u64                              │
+│  ├── authorized                                            │
+│  │   ├── staker: Pubkey                                    │
+│  │   └── withdrawer: Pubkey                                │
+│  └── lockup                                                │
+│      ├── unix_timestamp: i64                               │
+│      ├── epoch: u64                                        │
+│      └── custodian: Pubkey                                 │
+├─────────────────────────────────────────────────────────────┤
+│  Stake (when delegated)                                     │
+│  ├── delegation                                            │
+│  │   ├── voter_pubkey: Pubkey                              │
+│  │   ├── stake: u64                                        │
+│  │   ├── activation_epoch: u64                             │
+│  │   └── deactivation_epoch: u64                           │
+│  └── credits_observed: u64                                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Delegate
+## Stake Account States
 
-Once initialized, you delegate your stake to a validator's vote account:
+A stake account progresses through these states:
 
-```rust
-stake::instruction::delegate_stake(
-    &stake_account.pubkey(),
-    &stake_authority.pubkey(),
-    &vote_account.pubkey(),
-)
+| State | Description |
+|-------|-------------|
+| **Uninitialized** | Account exists but has no stake data |
+| **Initialized** | Authorities set, ready for delegation |
+| **Activating** | Delegation submitted, warming up over epochs |
+| **Active** | Fully delegated, earning rewards |
+| **Deactivating** | Deactivation requested, cooling down |
+| **Deactivated** | Fully inactive, can withdraw or re-delegate |
+
+## Minimum Delegation
+
+The minimum stake delegation is **1 SOL** (1,000,000,000 lamports). This minimum also determines the minimum balance for a delegated stake account:
+
+```
+minimum_balance = rent_exempt_reserve + minimum_delegation
 ```
 
-### 3. Warmup Period
 
-After delegation, stake enters a **warmup period**. During this time:
-- Stake is gradually activated over several epochs
-- You earn partial rewards proportional to active stake
-- You cannot withdraw until fully activated then deactivated
+# Instructions Reference The Stake Program provides 17 instructions for managing stake accounts. Instructions are grouped by function:
 
-### 4. Active
+## Account Initialization
 
-Once fully warmed up, your stake is **active**:
-- Earns full staking rewards
-- Contributes to validator's voting power
-- Can be split into multiple stake accounts
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Initialize](./initialize.md) | Set up stake account with authorities and lockup | ~7,500 |
+| [InitializeChecked](./initialize.md#initializechecked) | Initialize requiring withdraw authority signature | ~5,200 |
 
-### 5. Deactivate
+## Delegation Management
 
-When you want to unstake:
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [DelegateStake](./delegate.md) | Delegate stake to a validator | ~10,800 |
+| [Deactivate](./deactivate.md) | Begin deactivation cooldown | ~10,600 |
+| [DeactivateDelinquent](./deactivate.md#deactivatedelinquent) | Permissionless deactivation for abandoned validators | ~11,400 |
+
+## Withdrawal
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Withdraw](./withdraw.md) | Withdraw SOL from stake account | ~7,300 |
+
+## Account Operations
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Split](./split-merge.md#split) | Split stake into a new account | ~16,900 |
+| [Merge](./split-merge.md#merge) | Combine two stake accounts | ~17,600 |
+| [MoveStake](./move.md#movestake) | Transfer stake between accounts | ~21,700 |
+| [MoveLamports](./move.md#movelamports) | Transfer excess lamports | ~12,500 |
+
+## Authority Management
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Authorize](./authorize.md) | Change stake or withdraw authority | ~10,500 |
+| [AuthorizeChecked](./authorize.md#authorizechecked) | Authorize requiring new authority signature | ~10,200 |
+| [AuthorizeWithSeed](./authorize.md#authorizewithseed) | Authorize using derived key | ~11,700 |
+| [AuthorizeCheckedWithSeed](./authorize.md#authorizecheckedwithseed) | Authorize with seed + new authority signature | ~11,500 |
+
+## Lockup Management
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [SetLockup](./lockup.md) | Modify lockup parameters | ~9,300 |
+| [SetLockupChecked](./lockup.md#setlockupchecked) | Set lockup requiring new custodian signature | ~9,100 |
+
+## Utility
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [GetMinimumDelegation](./utility.md) | Query minimum delegation amount | ~negligible |
+
+## Compute Unit Notes
+
+The Stake Program was historically "free" at 1,500 CU regardless of operation. As a BPF program, it now consumes actual compute units. The estimates above are baselines from typical invocations—actual usage varies based on account states and arguments.
+
+## Instruction Encoding
+
+All instructions use a 4-byte discriminator followed by instruction-specific data:
 
 ```rust
-stake::instruction::deactivate_stake(
-    &stake_account.pubkey(),
-    &stake_authority.pubkey(),
-)
+pub enum StakeInstruction {
+    Initialize(Authorized, Lockup),           // 0
+    Authorize(Pubkey, StakeAuthorize),        // 1
+    DelegateStake,                            // 2
+    Split(u64),                               // 3
+    Withdraw(u64),                            // 4
+    Deactivate,                               // 5
+    SetLockup(LockupArgs),                    // 6
+    Merge,                                    // 7
+    AuthorizeWithSeed(AuthorizeWithSeedArgs), // 8
+    InitializeChecked,                        // 9
+    AuthorizeChecked(StakeAuthorize),         // 10
+    AuthorizeCheckedWithSeed(...),            // 11
+    SetLockupChecked(LockupCheckedArgs),      // 12
+    GetMinimumDelegation,                     // 13
+    DeactivateDelinquent,                     // 14
+    // Redelegate,                            // 15 (deprecated)
+    MoveStake(u64),                           // 16
+    MoveLamports(u64),                        // 17
+}
 ```
 
-### 6. Cooldown Period
+## Next Steps
 
-Similar to warmup, stake must go through a **cooldown period**:
-- Stake is gradually deactivated
-- Still earns partial rewards during this time
-- Takes approximately 2-3 days
-
-### 7. Withdraw
-
-After cooldown completes, you can withdraw your SOL:
-
-```rust
-stake::instruction::withdraw(
-    &stake_account.pubkey(),
-    &withdraw_authority.pubkey(),
-    &destination.pubkey(),
-    lamports,
-    None,
-)
-```
-
-## Key Concepts
-
-### Authorities
-
-| Authority | Permissions |
-|-----------|-------------|
-| Stake Authority | Delegate, deactivate, split, set new authorities |
-| Withdraw Authority | Withdraw SOL, close account |
-
-### Lockup
-
-Stake accounts can have an optional **lockup**:
-- Prevents withdrawal until a specific Unix timestamp or epoch
-- Useful for vesting schedules
-- Lockup authority can modify or remove lockup
-
-### Split & Merge
-
-You can **split** a stake account into two:
-- Original retains some stake
-- New account receives the rest
-- Both maintain same delegation
-
-You can **merge** two stake accounts if they:
-- Are delegated to the same validator
-- Have the same authorities
-- Are both fully activated or both fully deactivated
-
-## Common Patterns
-
-### Re-delegation
-
-To switch validators, you must:
-1. Deactivate current stake
-2. Wait for cooldown
-3. Delegate to new validator
-4. Wait for warmup
-
-This takes ~4-6 days total, which is why liquid staking exists!
-
-## Links
-
-- https://github.com/solana-program/stake
+- [Stake Accounts](./stake-accounts.md) - Understanding account structure and authorities
+- [Instructions](./instructions/index.md) - Complete instruction reference
+- [Lifecycle](./lifecycle.md) - Warmup, cooldown, and epoch boundaries

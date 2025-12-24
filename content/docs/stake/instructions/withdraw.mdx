@@ -1,0 +1,268 @@
+---
+title: Withdraw
+description: Withdraw SOL from a stake account.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 4 |
+| Estimated CU | ~7,300 |
+
+The `Withdraw` instruction transfers SOL from a stake account to a recipient. The amount that can be withdrawn depends on the stake account's state and lockup status.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to withdraw from |
+| 1 | Recipient | ✅ | ❌ | Destination for withdrawn SOL |
+| 2 | Clock Sysvar | ❌ | ❌ | `SysvarC1ock11111111111111111111111111111111` |
+| 3 | Stake History | ❌ | ❌ | `SysvarStakeHistory1111111111111111111111111` |
+| 4 | Withdraw Authority | ❌ | ✅ | Withdraw authority must sign |
+| 5 | Lockup Authority | ❌ | ✅ | (Optional) Required if lockup is active |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount to withdraw in lamports |
+
+## Withdrawable Amount
+
+The withdrawable amount depends on stake state:
+
+| State | Withdrawable |
+|-------|--------------|
+| Uninitialized | Full balance |
+| Initialized (no lockup) | Full balance |
+| Initialized (locked) | Nothing until lockup expires |
+| Activating | Inactive portion only |
+| Active | Nothing (must deactivate first) |
+| Deactivating | Inactive portion only |
+| Deactivated | Full balance minus rent reserve |
+
+### Calculating Withdrawable Amount
+
+```typescript
+async function getWithdrawableAmount(
+  connection: Connection,
+  stakeAccount: PublicKey
+): Promise<bigint> {
+  const accountInfo = await connection.getAccountInfo(stakeAccount);
+  if (!accountInfo) throw new Error('Account not found');
+  
+  const activation = await connection.getStakeActivation(stakeAccount);
+  const rentExempt = await connection.getMinimumBalanceForRentExemption(
+    accountInfo.data.length
+  );
+  
+  if (activation.state === 'inactive') {
+    // Can withdraw everything except rent reserve
+    return BigInt(accountInfo.lamports - rentExempt);
+  } else if (activation.state === 'deactivating' || activation.state === 'activating') {
+    // Can only withdraw inactive portion
+    return BigInt(activation.inactive);
+  } else {
+    // Active - cannot withdraw
+    return 0n;
+  }
+}
+```
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  StakeProgram,
+  LAMPORTS_PER_SOL,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+const stakeAccountPubkey = new PublicKey('...');
+const withdrawAuthority = /* Keypair */;
+const recipientPubkey = new PublicKey('...');
+
+// Withdraw 2 SOL
+const withdrawIx = StakeProgram.withdraw({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: withdrawAuthority.publicKey,
+  toPubkey: recipientPubkey,
+  lamports: 2 * LAMPORTS_PER_SOL,
+});
+
+const tx = new Transaction().add(withdrawIx);
+
+const signature = await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  withdrawAuthority,
+]);
+
+console.log('Withdrawal complete:', signature);
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { getWithdrawInstruction } from '@solana-program/stake';
+import { 
+  CLOCK_SYSVAR_ADDRESS, 
+  STAKE_HISTORY_SYSVAR_ADDRESS,
+  lamports,
+} from '@solana/kit';
+
+const withdrawIx = getWithdrawInstruction({
+  stakeAccount: stakeAccountAddress,
+  recipient: recipientAddress,
+  withdrawAuthority: withdrawAuthoritySigner,
+  lamports: lamports(2_000_000_000n), // 2 SOL
+  clock: CLOCK_SYSVAR_ADDRESS,
+  stakeHistory: STAKE_HISTORY_SYSVAR_ADDRESS,
+});
+```
+
+### Rust
+
+```rust
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    stake::instruction as stake_instruction,
+    transaction::Transaction,
+};
+
+fn withdraw_stake(
+    client: &RpcClient,
+    payer: &Keypair,
+    stake_account: &Pubkey,
+    withdraw_authority: &Keypair,
+    recipient: &Pubkey,
+    amount: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let withdraw_ix = stake_instruction::withdraw(
+        stake_account,
+        &withdraw_authority.pubkey(),
+        recipient,
+        amount,
+        None, // custodian (for locked accounts)
+    );
+
+    let recent_blockhash = client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[withdraw_ix],
+        Some(&payer.pubkey()),
+        &[payer, withdraw_authority],
+        recent_blockhash,
+    );
+
+    client.send_and_confirm_transaction(&tx)?;
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Withdraw 2 SOL to wallet
+solana withdraw-stake <STAKE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> 2
+
+# Withdraw all available funds
+solana withdraw-stake <STAKE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> ALL
+
+# With explicit withdraw authority
+solana withdraw-stake <STAKE_ACCOUNT_ADDRESS> <RECIPIENT_ADDRESS> 2 \
+  --withdraw-authority <WITHDRAW_AUTHORITY_KEYPAIR>
+```
+
+## Handling Lockups
+
+If a lockup is active, the lockup custodian must also sign:
+
+```typescript
+// Check if lockup is active
+const accountInfo = await connection.getParsedAccountInfo(stakeAccountPubkey);
+const parsed = accountInfo.value?.data.parsed;
+const lockup = parsed?.info?.meta?.lockup;
+
+const now = Math.floor(Date.now() / 1000);
+const currentEpoch = (await connection.getEpochInfo()).epoch;
+
+const isLocked = 
+  (lockup.unixTimestamp > now) || 
+  (lockup.epoch > currentEpoch);
+
+if (isLocked) {
+  console.log('Account is locked');
+  console.log('Lockup expires:', new Date(lockup.unixTimestamp * 1000));
+  console.log('Or after epoch:', lockup.epoch);
+  console.log('Custodian signature required:', lockup.custodian);
+  
+  // Include custodian in signers
+  const withdrawIx = StakeProgram.withdraw({
+    stakePubkey: stakeAccountPubkey,
+    authorizedPubkey: withdrawAuthority.publicKey,
+    toPubkey: recipientPubkey,
+    lamports: amount,
+    custodianPubkey: custodian.publicKey,
+  });
+}
+```
+
+## Withdraw to Close Account
+
+To fully close a stake account, withdraw all funds including the rent-exempt reserve:
+
+```typescript
+async function closeStakeAccount(
+  connection: Connection,
+  stakeAccount: PublicKey,
+  withdrawAuthority: Keypair,
+  recipient: PublicKey,
+) {
+  // Get full balance
+  const balance = await connection.getBalance(stakeAccount);
+  
+  // Verify stake is inactive
+  const activation = await connection.getStakeActivation(stakeAccount);
+  if (activation.state !== 'inactive') {
+    throw new Error('Stake must be fully deactivated before closing');
+  }
+  
+  // Withdraw everything
+  const withdrawIx = StakeProgram.withdraw({
+    stakePubkey: stakeAccount,
+    authorizedPubkey: withdrawAuthority.publicKey,
+    toPubkey: recipient,
+    lamports: balance, // Full balance including rent reserve
+  });
+  
+  const tx = new Transaction().add(withdrawIx);
+  await sendAndConfirmTransaction(connection, tx, [withdrawAuthority]);
+  
+  // Account will be closed (returned to system program) after this
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InsufficientFunds` | Requested amount exceeds withdrawable balance |
+| `LockupInEffect` | Lockup active and custodian not provided |
+| `InvalidAccountData` | Account not a valid stake account |
+
+## Security Notes
+
+- Only the withdraw authority can withdraw funds
+- Withdrawing everything closes the account
+- Consider keeping rent reserve to maintain account for future use
+- Verify recipient address carefully—withdrawals are irreversible

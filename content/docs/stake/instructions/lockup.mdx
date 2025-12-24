@@ -1,0 +1,347 @@
+---
+title: SetLockup
+description: Modify the lockup parameters of a stake account..
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 6 |
+| Estimated CU | ~9,300 |
+
+The `SetLockup` instruction modifies the lockup configuration of a stake account. Lockups restrict when SOL can be withdrawn.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to modify |
+| 1 | Authority | ❌ | ✅ | Withdraw authority or lockup custodian |
+
+## Arguments
+
+```rust
+pub struct LockupArgs {
+    pub unix_timestamp: Option<i64>,
+    pub epoch: Option<Epoch>,
+    pub custodian: Option<Pubkey>,
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `unix_timestamp` | `Option<i64>` | New timestamp restriction (None = don't change) |
+| `epoch` | `Option<u64>` | New epoch restriction (None = don't change) |
+| `custodian` | `Option<Pubkey>` | New custodian (None = don't change) |
+
+## Authorization Rules
+
+| Lockup State | Who Can Modify |
+|--------------|----------------|
+| No lockup active | Withdraw authority |
+| Lockup active | Lockup custodian only |
+| Lockup expired | Withdraw authority |
+
+## Lockup Mechanics
+
+A lockup prevents withdrawal until **both** conditions are met:
+- Current unix timestamp ≥ `lockup.unix_timestamp`
+- Current epoch ≥ `lockup.epoch`
+
+Setting either to 0 effectively disables that check.
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  StakeProgram,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+const stakeAccountPubkey = new PublicKey('...');
+const authority = /* Keypair - withdraw authority or custodian */;
+
+// Set lockup for 30 days from now
+const thirtyDaysFromNow = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
+
+const setLockupIx = StakeProgram.setLockup({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: authority.publicKey,
+  lockup: {
+    unixTimestamp: thirtyDaysFromNow,
+    epoch: 0, // No epoch restriction
+    custodian: authority.publicKey, // Set self as custodian
+  },
+});
+
+const tx = new Transaction().add(setLockupIx);
+await sendAndConfirmTransaction(connection, tx, [payer, authority]);
+```
+
+### Remove Lockup
+
+```typescript
+// Remove all lockup restrictions
+const removeLockupIx = StakeProgram.setLockup({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: custodian.publicKey, // Must be current custodian
+  lockup: {
+    unixTimestamp: 0,
+    epoch: 0,
+    custodian: PublicKey.default, // Or any address
+  },
+});
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { getSetLockupInstruction } from '@solana-program/stake';
+
+const setLockupIx = getSetLockupInstruction({
+  stakeAccount: stakeAccountAddress,
+  authority: authoritySigner,
+  lockupArgs: {
+    unixTimestamp: BigInt(thirtyDaysFromNow),
+    epoch: null, // Don't change
+    custodian: null, // Don't change
+  },
+});
+```
+
+### Rust
+
+```rust
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    stake::{
+        instruction as stake_instruction,
+        state::LockupArgs,
+    },
+    transaction::Transaction,
+};
+
+fn set_lockup(
+    client: &RpcClient,
+    payer: &Keypair,
+    stake_account: &Pubkey,
+    authority: &Keypair,
+    unix_timestamp: Option<i64>,
+    epoch: Option<u64>,
+    custodian: Option<Pubkey>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let set_lockup_ix = stake_instruction::set_lockup(
+        stake_account,
+        &LockupArgs {
+            unix_timestamp,
+            epoch,
+            custodian,
+        },
+        &authority.pubkey(),
+    );
+
+    let recent_blockhash = client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[set_lockup_ix],
+        Some(&payer.pubkey()),
+        &[payer, authority],
+        recent_blockhash,
+    );
+
+    client.send_and_confirm_transaction(&tx)?;
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Set lockup with timestamp
+solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
+  --lockup-date "2025-12-31T00:00:00Z"
+
+# Set lockup with epoch
+solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
+  --lockup-epoch 500
+
+# Set new custodian
+solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
+  --new-custodian <CUSTODIAN_PUBKEY>
+
+# Clear lockup (as custodian)
+solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
+  --lockup-date 0 \
+  --lockup-epoch 0 \
+  --custodian <CURRENT_CUSTODIAN_KEYPAIR>
+```
+
+---
+
+# SetLockupChecked
+
+Set lockup with additional verification that the new custodian signs.
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 12 |
+| Estimated CU | ~9,100 |
+
+Identical to `SetLockup`, but if setting a new custodian, that custodian must also sign.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to modify |
+| 1 | Authority | ❌ | ✅ | Withdraw authority or lockup custodian |
+| 2 | New Custodian | ❌ | ✅ | (Optional) New custodian must sign |
+
+## Arguments
+
+```rust
+pub struct LockupCheckedArgs {
+    pub unix_timestamp: Option<i64>,
+    pub epoch: Option<Epoch>,
+    // Note: custodian is passed as an account, not in args
+}
+```
+
+## Example
+
+```typescript
+// Set new custodian with their consent
+const setLockupCheckedIx = StakeProgram.setLockupChecked({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: currentCustodian.publicKey,
+  lockup: {
+    unixTimestamp: thirtyDaysFromNow,
+    epoch: null,
+  },
+  newCustodianPubkey: newCustodian.publicKey, // Must also sign
+});
+
+const tx = new Transaction().add(setLockupCheckedIx);
+await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  currentCustodian,
+  newCustodian, // Required signature
+]);
+```
+
+---
+
+## Checking Lockup Status
+
+```typescript
+async function checkLockupStatus(
+  connection: Connection,
+  stakeAccount: PublicKey
+): Promise<{
+  isLocked: boolean;
+  unlockDate?: Date;
+  unlockEpoch?: number;
+  custodian?: PublicKey;
+}> {
+  const accountInfo = await connection.getParsedAccountInfo(stakeAccount);
+  const lockup = accountInfo.value?.data.parsed.info.meta.lockup;
+  
+  const now = Math.floor(Date.now() / 1000);
+  const epochInfo = await connection.getEpochInfo();
+  
+  const timestampLocked = lockup.unixTimestamp > now;
+  const epochLocked = lockup.epoch > epochInfo.epoch;
+  const isLocked = timestampLocked || epochLocked;
+  
+  return {
+    isLocked,
+    unlockDate: lockup.unixTimestamp > 0 
+      ? new Date(lockup.unixTimestamp * 1000) 
+      : undefined,
+    unlockEpoch: lockup.epoch > 0 ? lockup.epoch : undefined,
+    custodian: new PublicKey(lockup.custodian),
+  };
+}
+
+// Usage
+const status = await checkLockupStatus(connection, stakeAccountPubkey);
+if (status.isLocked) {
+  console.log('Account is locked');
+  if (status.unlockDate) {
+    console.log('Unlocks at:', status.unlockDate);
+  }
+  if (status.unlockEpoch) {
+    console.log('Unlocks at epoch:', status.unlockEpoch);
+  }
+} else {
+  console.log('Account is unlocked, can withdraw freely');
+}
+```
+
+---
+
+## Use Cases
+
+### Vesting Schedule
+
+```typescript
+// Create stake with 1-year lockup
+const oneYearFromNow = Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60);
+
+const initIx = StakeProgram.initialize({
+  stakePubkey: stakeAccount.publicKey,
+  authorized: {
+    staker: employee.publicKey,
+    withdrawer: employee.publicKey,
+  },
+  lockup: {
+    unixTimestamp: oneYearFromNow,
+    epoch: 0,
+    custodian: employer.publicKey, // Employer can modify/cancel
+  },
+});
+```
+
+### Escrow Protection
+
+```typescript
+// Lock stake until a specific epoch (e.g., after a governance vote)
+const governanceEpoch = 550;
+
+const lockupIx = StakeProgram.setLockup({
+  stakePubkey: escrowStake,
+  authorizedPubkey: escrowAuthority.publicKey,
+  lockup: {
+    unixTimestamp: 0,
+    epoch: governanceEpoch,
+    custodian: governanceMultisig,
+  },
+});
+```
+
+---
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `CustodianMissing` | Lockup active but custodian not provided |
+| `MissingRequiredSignature` | Required signer not present |
+| `InvalidAccountData` | Account not a valid stake account |
+
+## Notes
+
+- Lockup does not prevent delegation, deactivation, or authority changes
+- Lockup only restricts withdrawal operations
+- Setting both timestamp and epoch to 0 effectively removes the lockup
+- The custodian can always override or remove the lockup

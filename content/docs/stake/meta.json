@@ -1,4 +1,4 @@
 {
   "title": "Stake",
-  "pages": ["index"]
+  "pages": ["index", "stake-accounts", "instructions", "lifecycle", "utility"]
 }

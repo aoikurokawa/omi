@@ -1,0 +1,13 @@
+{
+  "title": "Instructions",
+  "pages": [
+    "initialize",
+    "delegate",
+    "deactivate",
+    "withdraw",
+    "split-merge",
+    "authorize",
+    "move",
+    "lockup"
+  ]
+}
