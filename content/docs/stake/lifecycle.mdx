@@ -1,0 +1,269 @@
+---
+title: Stake Lifecycle
+description: Understanding the stake lifecycle is crucial for managing delegations effectively. Stake transitions through warmup and cooldown periods that span multiple epochs.
+---
+
+## Epoch Overview
+
+Solana divides time into **epochs**, each lasting approximately 2-3 days on mainnet (~432,000 slots). Stake state changes occur at epoch boundaries.
+
+| Network | Slots per Epoch | Approximate Duration |
+|---------|-----------------|----------------------|
+| Mainnet | 432,000 | ~2-3 days |
+| Devnet | 432,000 | ~2-3 days |
+| Testnet | Variable | Variable |
+| Localnet | Configurable | Configurable |
+
+## Lifecycle States
+
+```
+┌──────────────┐     Initialize      ┌─────────────┐
+│ Uninitialized│ ─────────────────▶  │ Initialized │
+└──────────────┘                     └──────┬──────┘
+                                           │
+                                     DelegateStake
+                                           │
+                                           ▼
+┌──────────────┐     Epoch Boundary   ┌─────────────┐
+│    Active    │ ◀─────────────────── │ Activating  │
+└──────┬───────┘     (warmup)         └─────────────┘
+       │
+   Deactivate
+       │
+       ▼
+┌──────────────┐     Epoch Boundary   ┌─────────────┐
+│ Deactivated  │ ◀─────────────────── │ Deactivating│
+└──────────────┘     (cooldown)       └─────────────┘
+```
+
+## Warmup Period
+
+When stake is delegated, it doesn't become active immediately. The stake "warms up" over multiple epochs.
+
+### How Warmup Works
+
+1. **Delegation Submitted**: Transaction processed mid-epoch
+2. **Activation Epoch**: Set to current epoch
+3. **Effective Stake**: Gradually increases each epoch until fully active
+
+The warmup rate depends on total network stake activating. More stake activating network-wide means slower individual warmup.
+
+### Example Timeline
+
+```
+Epoch 100: Delegate 100 SOL → effective_stake = 0 SOL
+Epoch 101: Warmup begins    → effective_stake = 25 SOL
+Epoch 102: Continuing       → effective_stake = 50 SOL
+Epoch 103: Continuing       → effective_stake = 75 SOL
+Epoch 104: Fully active     → effective_stake = 100 SOL
+```
+
+> **Note**: Actual warmup duration varies based on network conditions. The example above is simplified.
+
+### Checking Activation Status
+
+```typescript
+import { Connection, PublicKey } from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com');
+const stakeAccount = new PublicKey('...');
+
+const stakeActivation = await connection.getStakeActivation(stakeAccount);
+
+console.log('State:', stakeActivation.state);
+console.log('Active:', stakeActivation.active);
+console.log('Inactive:', stakeActivation.inactive);
+
+// state can be: 'inactive', 'activating', 'active', 'deactivating'
+```
+
+### Rust Example
+
+```rust
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
+
+let client = RpcClient::new("https://api.mainnet-beta.solana.com");
+let stake_pubkey = Pubkey::from_str("...")?;
+
+let activation = client.get_stake_activation(stake_pubkey, None)?;
+
+println!("State: {:?}", activation.state);
+println!("Active: {} lamports", activation.active);
+println!("Inactive: {} lamports", activation.inactive);
+```
+
+## Cooldown Period
+
+When stake is deactivated, it enters a cooldown period before becoming withdrawable.
+
+### How Cooldown Works
+
+1. **Deactivation Submitted**: Transaction processed mid-epoch
+2. **Deactivation Epoch**: Set to current epoch
+3. **Effective Stake**: Gradually decreases each epoch until fully inactive
+4. **Rewards**: Stake continues earning rewards proportional to effective stake during cooldown
+
+### Example Timeline
+
+```
+Epoch 200: Active stake = 100 SOL, earning full rewards
+Epoch 200: Deactivate transaction submitted
+Epoch 201: effective_stake = 75 SOL, earning 75% rewards
+Epoch 202: effective_stake = 50 SOL, earning 50% rewards
+Epoch 203: effective_stake = 25 SOL, earning 25% rewards
+Epoch 204: effective_stake = 0 SOL, fully withdrawable
+```
+
+### Immediate Deactivation
+
+In some cases, stake can be deactivated immediately:
+
+- **Bootstrap Stakes**: Stakes created before epoch 0
+- **Minimum Delegation**: If remaining stake would be below minimum (1 SOL)
+
+## Re-delegation
+
+You can delegate already-active stake to a different validator, but re-delegation is subject to a one-epoch delay:
+
+```typescript
+// Stake is currently delegated to Validator A
+// Re-delegate to Validator B
+
+const redelegateIx = StakeProgram.delegate({
+  stakePubkey: stakeAccount.publicKey,
+  authorizedPubkey: stakeAuthority.publicKey,
+  votePubkey: validatorBVoteAccount,
+});
+
+// The re-delegation takes effect at the next epoch boundary
+// During transition: stake may briefly earn no rewards
+```
+
+### Re-delegation Timeline
+
+```
+Epoch 300: Active with Validator A, earning rewards
+Epoch 300: Re-delegate to Validator B submitted
+Epoch 301: Deactivating from A, activating with B (reduced/no rewards)
+Epoch 302+: Warming up with Validator B
+```
+
+> **Warning**: Re-delegation can result in missed rewards during the transition period. Consider the timing carefully.
+
+## Rewards
+
+Staking rewards are distributed at the end of each epoch based on:
+
+1. **Effective Stake**: Amount of stake that was active during the epoch
+2. **Validator Performance**: Uptime, vote credits earned
+3. **Commission**: Validator's fee (percentage of rewards)
+4. **Inflation Rate**: Network's current inflation schedule
+
+### Reward Calculation
+
+```
+reward = (effective_stake / total_stake) × epoch_rewards × (1 - commission)
+```
+
+### Claiming Rewards
+
+Rewards are automatically credited to stake accounts. No explicit claim is needed. The stake account balance increases at each epoch boundary.
+
+To see reward history:
+
+```typescript
+const signatures = await connection.getSignaturesForAddress(
+  stakeAccount,
+  { limit: 10 }
+);
+
+for (const sig of signatures) {
+  const tx = await connection.getParsedTransaction(sig.signature);
+  // Look for stake reward info in tx.meta
+}
+```
+
+## Merge Constraints
+
+Two stake accounts can only be merged if they meet these conditions:
+
+| Condition | Requirement |
+|-----------|-------------|
+| Same authorities | Both must have identical stake and withdraw authorities |
+| Same lockup | Both must have identical lockup parameters |
+| Same voter | Both delegated to same validator OR one/both inactive |
+| Compatible states | See merge state matrix below |
+
+### Merge State Matrix
+
+| Source State | Destination State | Mergeable? |
+|--------------|-------------------|------------|
+| Inactive | Inactive | ✅ Yes |
+| Inactive | Activating | ✅ Yes |
+| Inactive | Active | ✅ Yes (if same activation epoch) |
+| Activating | Activating | ✅ Yes (if same activation epoch) |
+| Active | Active | ✅ Yes (if same activation epoch) |
+
+```typescript
+import { StakeProgram } from '@solana/web3.js';
+
+const mergeIx = StakeProgram.merge({
+  stakePubkey: destinationStake.publicKey,
+  sourceStakePubkey: sourceStake.publicKey,
+  authorizedPubkey: stakeAuthority.publicKey,
+});
+```
+
+## Split Constraints
+
+Splitting a stake account creates a new account with a portion of the funds:
+
+| Constraint | Requirement |
+|------------|-------------|
+| Minimum remaining | Source must retain ≥ rent exempt reserve + minimum delegation |
+| Minimum transferred | New account must receive ≥ rent exempt reserve + minimum delegation |
+| State preserved | New account inherits delegation state from source |
+
+```typescript
+const splitIx = StakeProgram.split({
+  stakePubkey: sourceStake.publicKey,
+  authorizedPubkey: stakeAuthority.publicKey,
+  splitStakePubkey: newStakeAccount.publicKey,
+  lamports: amountToSplit,
+});
+```
+
+## Best Practices
+
+### Timing Delegations
+
+- **Delegate early in epoch**: Maximize time for warmup to complete
+- **Avoid epoch boundaries**: Transactions near boundaries may land in unexpected epochs
+
+### Monitoring Health
+
+```typescript
+async function checkStakeHealth(
+  connection: Connection,
+  stakeAccount: PublicKey
+) {
+  const activation = await connection.getStakeActivation(stakeAccount);
+  const epochInfo = await connection.getEpochInfo();
+  
+  return {
+    state: activation.state,
+    effectiveStake: activation.active,
+    pendingStake: activation.inactive,
+    currentEpoch: epochInfo.epoch,
+    epochProgress: epochInfo.slotIndex / epochInfo.slotsInEpoch,
+  };
+}
+```
+
+### Handling Edge Cases
+
+1. **Partial Activation**: If you need liquidity during warmup, split the account and withdraw from the inactive portion
+2. **Emergency Withdrawal**: Deactivate immediately, but expect cooldown period before full withdrawal
+3. **Validator Change**: Consider timing to minimize reward loss during re-delegation

@@ -1,0 +1,254 @@
+---
+title: Initialize
+description: Initialize a stake account with authorized signers and optional lockup.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 0 |
+| Estimated CU | ~7,500 |
+
+The `Initialize` instruction sets up a stake account's metadata including the stake authority, withdraw authority, and lockup configuration. The account must be created (via System Program) before initialization.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to initialize |
+| 1 | Rent Sysvar | ❌ | ❌ | `SysvarRent111111111111111111111111111111111` |
+
+## Arguments
+
+```rust
+pub struct Authorized {
+    pub staker: Pubkey,
+    pub withdrawer: Pubkey,
+}
+
+pub struct Lockup {
+    pub unix_timestamp: i64,
+    pub epoch: Epoch,
+    pub custodian: Pubkey,
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `authorized.staker` | Pubkey | Authority for delegation operations |
+| `authorized.withdrawer` | Pubkey | Authority for withdrawal operations |
+| `lockup.unix_timestamp` | i64 | Unix timestamp for withdrawal restriction (0 = no restriction) |
+| `lockup.epoch` | u64 | Epoch for withdrawal restriction (0 = no restriction) |
+| `lockup.custodian` | Pubkey | Authority that can modify lockup |
+
+## Behavior
+
+1. Validates stake account is uninitialized
+2. Validates account has sufficient balance for rent exemption
+3. Sets the `Meta` portion of stake account data
+4. Account enters `Initialized` state, ready for delegation
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  Keypair,
+  SystemProgram,
+  Transaction,
+  StakeProgram,
+  LAMPORTS_PER_SOL,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const payer = Keypair.generate();
+const stakeAccount = Keypair.generate();
+
+// Request airdrop for testing
+await connection.requestAirdrop(payer.publicKey, 10 * LAMPORTS_PER_SOL);
+
+// Calculate rent-exempt minimum
+const rentExemptBalance = await connection.getMinimumBalanceForRentExemption(
+  StakeProgram.space
+);
+
+// Create and initialize stake account
+const tx = new Transaction().add(
+  // Create the account
+  SystemProgram.createAccount({
+    fromPubkey: payer.publicKey,
+    newAccountPubkey: stakeAccount.publicKey,
+    lamports: rentExemptBalance + 5 * LAMPORTS_PER_SOL,
+    space: StakeProgram.space,
+    programId: StakeProgram.programId,
+  }),
+  // Initialize with authorities
+  StakeProgram.initialize({
+    stakePubkey: stakeAccount.publicKey,
+    authorized: {
+      staker: payer.publicKey,
+      withdrawer: payer.publicKey,
+    },
+    lockup: {
+      unixTimestamp: 0,
+      epoch: 0,
+      custodian: payer.publicKey,
+    },
+  })
+);
+
+const signature = await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  stakeAccount,
+]);
+console.log('Initialized stake account:', stakeAccount.publicKey.toBase58());
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { 
+  createSolanaRpc,
+  createKeyPairSignerFromBytes,
+  getCreateAccountInstruction,
+  lamports,
+  pipe,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  appendTransactionMessageInstructions,
+  signTransactionMessageWithSigners,
+  sendAndConfirmTransactionFactory,
+} from '@solana/kit';
+import {
+  getInitializeInstruction,
+  STAKE_ACCOUNT_SIZE,
+  STAKE_PROGRAM_ADDRESS,
+} from '@solana-program/stake';
+
+const rpc = createSolanaRpc('https://api.devnet.solana.com');
+const payer = await createKeyPairSignerFromBytes(/* your keypair bytes */);
+const stakeAccount = await generateKeyPairSigner();
+
+const rentExempt = await rpc.getMinimumBalanceForRentExemption(STAKE_ACCOUNT_SIZE).send();
+
+const instructions = [
+  getCreateAccountInstruction({
+    payer,
+    newAccount: stakeAccount,
+    lamports: lamports(rentExempt + 5_000_000_000n),
+    space: STAKE_ACCOUNT_SIZE,
+    programAddress: STAKE_PROGRAM_ADDRESS,
+  }),
+  getInitializeInstruction({
+    stakeAccount: stakeAccount.address,
+    authorized: {
+      staker: payer.address,
+      withdrawer: payer.address,
+    },
+    lockup: {
+      unixTimestamp: 0n,
+      epoch: 0n,
+      custodian: payer.address,
+    },
+  }),
+];
+
+// Build and send transaction...
+```
+
+### Rust
+
+```rust
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    native_token::LAMPORTS_PER_SOL,
+    signature::{Keypair, Signer},
+    stake::{
+        instruction as stake_instruction,
+        state::{Authorized, Lockup},
+    },
+    system_instruction,
+    transaction::Transaction,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = RpcClient::new_with_commitment(
+        "https://api.devnet.solana.com",
+        CommitmentConfig::confirmed(),
+    );
+
+    let payer = Keypair::new();
+    let stake_account = Keypair::new();
+
+    // Get rent-exempt minimum
+    let rent_exempt_balance = client
+        .get_minimum_balance_for_rent_exemption(std::mem::size_of::<
+            solana_sdk::stake::state::StakeStateV2,
+        >())?;
+
+    let stake_amount = 5 * LAMPORTS_PER_SOL;
+
+    let instructions = vec![
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &stake_account.pubkey(),
+            rent_exempt_balance + stake_amount,
+            std::mem::size_of::<solana_sdk::stake::state::StakeStateV2>() as u64,
+            &solana_sdk::stake::program::id(),
+        ),
+        stake_instruction::initialize(
+            &stake_account.pubkey(),
+            &Authorized {
+                staker: payer.pubkey(),
+                withdrawer: payer.pubkey(),
+            },
+            &Lockup::default(),
+        ),
+    ];
+
+    let recent_blockhash = client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &instructions,
+        Some(&payer.pubkey()),
+        &[&payer, &stake_account],
+        recent_blockhash,
+    );
+
+    let signature = client.send_and_confirm_transaction(&tx)?;
+    println!("Signature: {}", signature);
+
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Create and initialize a stake account with 5 SOL
+solana create-stake-account stake-keypair.json 5 \
+  --stake-authority <STAKE_AUTHORITY_PUBKEY> \
+  --withdraw-authority <WITHDRAW_AUTHORITY_PUBKEY>
+
+# With lockup (locked until specific date)
+solana create-stake-account stake-keypair.json 5 \
+  --lockup-date "2025-12-31T00:00:00Z" \
+  --custodian <CUSTODIAN_PUBKEY>
+
+# With lockup (locked until specific epoch)
+solana create-stake-account stake-keypair.json 5 \
+  --lockup-epoch 500
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InvalidAccountData` | Account already initialized |
+| `InsufficientFunds` | Account balance below rent-exempt minimum |
+
+---

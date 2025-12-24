@@ -1,0 +1,325 @@
+---
+title: Stake Accounts
+description: Stake accounts are specialized accounts that hold SOL for delegation to validators. Unlike system accounts (regular wallets), stake accounts have additional metadata for managing delegations, authorities, and lockups.
+---
+
+## Account Structure
+
+A stake account contains two main components:
+
+### Meta
+
+The `Meta` structure stores account configuration that persists across delegations:
+
+```rust
+pub struct Meta {
+    /// Rent-exempt reserve in lamports
+    pub rent_exempt_reserve: u64,
+    /// Signing authorities
+    pub authorized: Authorized,
+    /// Withdrawal restrictions
+    pub lockup: Lockup,
+}
+```
+
+### Stake
+
+The `Stake` structure stores delegation information (only present when delegated):
+
+```rust
+pub struct Stake {
+    pub delegation: Delegation,
+    /// Credits observed from the vote account
+    pub credits_observed: u64,
+}
+
+pub struct Delegation {
+    /// Vote account to which stake is delegated
+    pub voter_pubkey: Pubkey,
+    /// Delegated stake amount in lamports
+    pub stake: u64,
+    /// Epoch at which delegation became active
+    pub activation_epoch: u64,
+    /// Epoch at which delegation was deactivated (u64::MAX if active)
+    pub deactivation_epoch: u64,
+}
+```
+
+## Authorities
+
+Stake accounts have two distinct authorities with different permissions:
+
+### Stake Authority
+
+The stake authority can perform delegation management operations:
+
+| Operation | Description |
+|-----------|-------------|
+| `DelegateStake` | Delegate stake to a validator |
+| `Deactivate` | Begin the deactivation cooldown |
+| `Split` | Split stake into a new account |
+| `Merge` | Merge two stake accounts |
+| `Authorize` | Change stake authority |
+| `SetLockup` | Modify lockup (if no lockup or lockup expired) |
+| `MoveStake` | Transfer stake between accounts |
+
+### Withdraw Authority
+
+The withdraw authority has broader control:
+
+| Operation | Description |
+|-----------|-------------|
+| `Withdraw` | Withdraw SOL from the account |
+| `Authorize` | Change either authority |
+| `SetLockup` | Modify lockup (when lockup custodian) |
+| `MoveLamports` | Transfer excess lamports |
+
+> **Security Note**: The withdraw authority is more privileged. If compromised, an attacker can drain the account. Keep the withdraw authority keypair secure, ideally in cold storage.
+
+## Setting Authorities
+
+### At Initialization
+
+```typescript
+import { 
+  getInitializeInstruction,
+  STAKE_PROGRAM_ADDRESS 
+} from '@solana-program/stake';
+
+const initializeIx = getInitializeInstruction({
+  stakeAccount: stakeAccountAddress,
+  authorized: {
+    staker: stakerPubkey,
+    withdrawer: withdrawerPubkey,
+  },
+  lockup: {
+    unixTimestamp: 0n,  // No time lock
+    epoch: 0n,          // No epoch lock
+    custodian: SystemProgram.programId, // No custodian
+  },
+});
+```
+
+### Changing Authorities
+
+Use `Authorize` to change an authority:
+
+```typescript
+import { 
+  getAuthorizeInstruction,
+  StakeAuthorize 
+} from '@solana-program/stake';
+
+// Change stake authority (requires current stake authority signature)
+const authorizeIx = getAuthorizeInstruction({
+  stakeAccount: stakeAccountAddress,
+  authority: currentStakeAuthority,
+  newAuthority: newStakeAuthorityPubkey,
+  stakeAuthorize: StakeAuthorize.Staker,
+});
+
+// Change withdraw authority (requires current withdraw authority signature)
+const authorizeWithdrawIx = getAuthorizeInstruction({
+  stakeAccount: stakeAccountAddress,
+  authority: currentWithdrawAuthority,
+  newAuthority: newWithdrawAuthorityPubkey,
+  stakeAuthorize: StakeAuthorize.Withdrawer,
+});
+```
+
+### Using Checked Variants
+
+The "Checked" variants require the new authority to also sign, preventing accidental transfers to wrong addresses:
+
+```typescript
+import { getAuthorizeCheckedInstruction } from '@solana-program/stake';
+
+const authorizeCheckedIx = getAuthorizeCheckedInstruction({
+  stakeAccount: stakeAccountAddress,
+  authority: currentAuthority,
+  newAuthority: newAuthorityPubkey,  // Must also sign
+  stakeAuthorize: StakeAuthorize.Staker,
+});
+```
+
+## Lockup
+
+Lockups restrict withdrawals until a specified time or epoch:
+
+```rust
+pub struct Lockup {
+    /// Unix timestamp after which withdrawal is allowed
+    pub unix_timestamp: i64,
+    /// Epoch after which withdrawal is allowed
+    pub epoch: Epoch,
+    /// Custodian who can modify or override lockup
+    pub custodian: Pubkey,
+}
+```
+
+### Lockup Rules
+
+- Both `unix_timestamp` AND `epoch` must be satisfied for withdrawal
+- The custodian can modify lockup parameters at any time
+- If no lockup is needed, set both to 0 and custodian to a null address
+- While locked, stake can still be delegated, split, or have authorities changed
+
+### Setting Lockup
+
+```typescript
+import { getSetLockupInstruction } from '@solana-program/stake';
+
+const setLockupIx = getSetLockupInstruction({
+  stakeAccount: stakeAccountAddress,
+  authority: withdrawAuthorityOrCustodian,
+  lockupArgs: {
+    unixTimestamp: BigInt(Date.now() / 1000 + 86400 * 30), // 30 days
+    epoch: null,      // Don't change epoch
+    custodian: null,  // Don't change custodian
+  },
+});
+```
+
+## Creating a Stake Account
+
+### Using System Program
+
+```typescript
+import { 
+  Connection, 
+  Keypair, 
+  SystemProgram, 
+  Transaction,
+  LAMPORTS_PER_SOL,
+  StakeProgram,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com');
+const payer = Keypair.generate();
+const stakeAccount = Keypair.generate();
+
+// Calculate minimum balance
+const rentExemptBalance = await connection.getMinimumBalanceForRentExemption(
+  StakeProgram.space
+);
+const stakeAmount = 5 * LAMPORTS_PER_SOL;
+
+const createAccountIx = SystemProgram.createAccount({
+  fromPubkey: payer.publicKey,
+  newAccountPubkey: stakeAccount.publicKey,
+  lamports: rentExemptBalance + stakeAmount,
+  space: StakeProgram.space,
+  programId: StakeProgram.programId,
+});
+
+const initializeIx = StakeProgram.initialize({
+  stakePubkey: stakeAccount.publicKey,
+  authorized: {
+    staker: payer.publicKey,
+    withdrawer: payer.publicKey,
+  },
+  lockup: {
+    unixTimestamp: 0,
+    epoch: 0,
+    custodian: PublicKey.default,
+  },
+});
+
+const tx = new Transaction().add(createAccountIx, initializeIx);
+```
+
+### Using Stake Account with Seed
+
+For deterministic addresses:
+
+```typescript
+import { PublicKey, StakeProgram } from '@solana/web3.js';
+
+const seed = 'stake:0';
+const stakeAccountPubkey = await PublicKey.createWithSeed(
+  basePubkey,
+  seed,
+  StakeProgram.programId
+);
+
+const createWithSeedIx = SystemProgram.createAccountWithSeed({
+  fromPubkey: payer.publicKey,
+  newAccountPubkey: stakeAccountPubkey,
+  basePubkey: basePubkey,
+  seed: seed,
+  lamports: rentExemptBalance + stakeAmount,
+  space: StakeProgram.space,
+  programId: StakeProgram.programId,
+});
+```
+
+## Querying Stake Accounts
+
+### Get Account Info
+
+```typescript
+import { Connection, PublicKey } from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com');
+
+const accountInfo = await connection.getParsedAccountInfo(stakeAccountPubkey);
+if (accountInfo.value) {
+  const parsed = accountInfo.value.data.parsed;
+  console.log('State:', parsed.type);
+  console.log('Stake:', parsed.info.stake);
+  console.log('Meta:', parsed.info.meta);
+}
+```
+
+### Find All Stake Accounts for a Validator
+
+```typescript
+const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
+const validatorVoteAccount = new PublicKey('...');
+
+const accounts = await connection.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+  filters: [
+    { dataSize: 200 },
+    {
+      memcmp: {
+        offset: 124, // voter_pubkey offset in stake account
+        bytes: validatorVoteAccount.toBase58(),
+      },
+    },
+  ],
+});
+
+console.log(`Found ${accounts.length} delegators`);
+```
+
+### Find Stake Accounts by Authority
+
+```typescript
+const authorityPubkey = new PublicKey('...');
+
+// Find by stake authority
+const byStaker = await connection.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+  filters: [
+    { dataSize: 200 },
+    {
+      memcmp: {
+        offset: 12, // staker offset
+        bytes: authorityPubkey.toBase58(),
+      },
+    },
+  ],
+});
+
+// Find by withdraw authority
+const byWithdrawer = await connection.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+  filters: [
+    { dataSize: 200 },
+    {
+      memcmp: {
+        offset: 44, // withdrawer offset
+        bytes: authorityPubkey.toBase58(),
+      },
+    },
+  ],
+});
+```

@@ -1,0 +1,147 @@
+---
+title: DeactivateDelinquent
+description: Permissionless deactivation of stake delegated to delinquent validators.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 14 |
+| Estimated CU | ~11,400 |
+
+This instruction allows anyone to deactivate stake that is delegated to a validator that has been delinquent (not voting) for an extended period. No signature from the stake authority is required.
+
+## Purpose
+
+`DeactivateDelinquent` serves as a network health mechanism:
+- Protects delegators from validators that have gone offline
+- Enables stake to be recovered without stake authority action
+- Promotes network decentralization by moving stake away from inactive validators
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to deactivate |
+| 1 | Vote Account | ❌ | ❌ | The delinquent validator's vote account |
+| 2 | Reference Vote Account | ❌ | ❌ | A vote account that has voted recently |
+| 3 | Clock Sysvar | ❌ | ❌ | `SysvarC1ock11111111111111111111111111111111` |
+
+## Arguments
+
+None.
+
+## Delinquency Threshold
+
+A validator is considered delinquent if they have not voted in the last **5 epochs** (approximately 10-15 days on mainnet).
+
+```rust
+const MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION: u64 = 5;
+```
+
+## Reference Vote Account
+
+The reference vote account proves that voting is possible on the network. It must have voted within the delinquency threshold. This prevents false positives during network issues.
+
+## Examples
+
+### TypeScript
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  SYSVAR_CLOCK_PUBKEY,
+} from '@solana/web3.js';
+
+const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
+
+async function deactivateDelinquent(
+  connection: Connection,
+  stakeAccount: PublicKey,
+  delinquentVoteAccount: PublicKey,
+  referenceVoteAccount: PublicKey,
+) {
+  // Instruction index 14 = DeactivateDelinquent
+  const data = Buffer.alloc(4);
+  data.writeUInt32LE(14, 0);
+
+  const ix = new TransactionInstruction({
+    keys: [
+      { pubkey: stakeAccount, isSigner: false, isWritable: true },
+      { pubkey: delinquentVoteAccount, isSigner: false, isWritable: false },
+      { pubkey: referenceVoteAccount, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    programId: STAKE_PROGRAM_ID,
+    data,
+  });
+
+  const tx = new Transaction().add(ix);
+  return tx;
+}
+```
+
+### Finding Delinquent Validators
+
+```typescript
+async function findDelinquentValidators(connection: Connection) {
+  const { current, delinquent } = await connection.getVoteAccounts();
+  
+  console.log('Active validators:', current.length);
+  console.log('Delinquent validators:', delinquent.length);
+  
+  // Delinquent validators with significant stake
+  const significantDelinquent = delinquent.filter(
+    v => v.activatedStake > 1_000_000_000_000 // > 1000 SOL
+  );
+  
+  for (const validator of significantDelinquent) {
+    console.log('Delinquent:', validator.votePubkey);
+    console.log('  Stake:', validator.activatedStake / 1e9, 'SOL');
+    console.log('  Last Vote:', validator.lastVote);
+  }
+  
+  return delinquent;
+}
+```
+
+### Finding Reference Vote Account
+
+```typescript
+async function findReferenceVoteAccount(connection: Connection) {
+  const { current } = await connection.getVoteAccounts();
+  
+  // Use a highly active validator as reference
+  const sorted = current.sort((a, b) => b.lastVote - a.lastVote);
+  
+  if (sorted.length > 0) {
+    return new PublicKey(sorted[0].votePubkey);
+  }
+  
+  throw new Error('No active validators found');
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InsufficientDelinquentEpochs` | Validator hasn't been delinquent long enough |
+| `InvalidAccountData` | Stake not delegated to the specified vote account |
+| `ReferenceVoteAccountNotVoted` | Reference vote account is also delinquent |
+
+## Use Cases
+
+1. **Automated Stake Management**: Bots can monitor and deactivate stakes from delinquent validators
+2. **Custodial Services**: Protect client stakes without requiring their signatures
+3. **Network Health**: Community members can help clean up abandoned delegations
+
+## Security Considerations
+
+- This instruction cannot be used maliciously against active validators
+- The 5-epoch threshold provides validators time to recover from temporary issues
+- Delegators should still monitor their stakes and proactively manage delegations

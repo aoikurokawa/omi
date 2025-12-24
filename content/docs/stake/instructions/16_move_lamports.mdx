@@ -1,0 +1,209 @@
+---
+title: MoveLamports
+description: Transfer excess lamports (non-stake balance) between stake accounts.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 17 |
+| Estimated CU | ~12,500 |
+
+The `MoveLamports` instruction transfers lamports that exceed the stake + rent reserve from one account to another. This is useful for reclaiming rewards or excess balance without affecting the delegation.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Source Stake Account | ✅ | ❌ | Account to transfer from |
+| 1 | Destination Stake Account | ✅ | ❌ | Account to receive lamports |
+| 2 | Stake Authority | ❌ | ✅ | Stake authority for source account |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount of lamports to move |
+
+## Transferable Balance
+
+The transferable balance is calculated as:
+
+```
+transferable = account_balance - rent_exempt_reserve - delegated_stake
+```
+
+Rewards earned accumulate as excess lamports and can be moved without affecting the delegation.
+
+## Examples
+
+### TypeScript
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+} from '@solana/web3.js';
+
+const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
+
+function createMoveLamportsInstruction(
+  sourceStake: PublicKey,
+  destinationStake: PublicKey,
+  stakeAuthority: PublicKey,
+  lamports: bigint,
+): TransactionInstruction {
+  // Instruction index 17 + u64 lamports
+  const data = Buffer.alloc(4 + 8);
+  data.writeUInt32LE(17, 0);
+  data.writeBigUInt64LE(lamports, 4);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: sourceStake, isSigner: false, isWritable: true },
+      { pubkey: destinationStake, isSigner: false, isWritable: true },
+      { pubkey: stakeAuthority, isSigner: true, isWritable: false },
+    ],
+    programId: STAKE_PROGRAM_ID,
+    data,
+  });
+}
+
+// Calculate excess lamports (rewards)
+async function getExcessLamports(
+  connection: Connection,
+  stakeAccount: PublicKey,
+): Promise<bigint> {
+  const accountInfo = await connection.getParsedAccountInfo(stakeAccount);
+  const parsed = accountInfo.value?.data.parsed.info;
+  
+  const balance = BigInt(accountInfo.value?.lamports || 0);
+  const rentReserve = BigInt(parsed.meta.rentExemptReserve);
+  const delegatedStake = BigInt(parsed.stake?.delegation?.stake || 0);
+  
+  const minimum = rentReserve + delegatedStake;
+  return balance > minimum ? balance - minimum : 0n;
+}
+
+// Usage
+const excess = await getExcessLamports(connection, sourceStakePubkey);
+console.log('Excess lamports (rewards):', excess);
+
+if (excess > 0n) {
+  const moveIx = createMoveLamportsInstruction(
+    sourceStakePubkey,
+    destinationStakePubkey,
+    stakeAuthority.publicKey,
+    excess,
+  );
+  
+  const tx = new Transaction().add(moveIx);
+  await sendAndConfirmTransaction(connection, tx, [payer, stakeAuthority]);
+}
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { getMoveLamportsInstruction } from '@solana-program/stake';
+import { lamports } from '@solana/kit';
+
+const moveLamportsIx = getMoveLamportsInstruction({
+  sourceStakeAccount: sourceStakeAddress,
+  destinationStakeAccount: destinationStakeAddress,
+  stakeAuthority: stakeAuthoritySigner,
+  lamports: lamports(excessAmount),
+});
+```
+
+---
+
+## Use Cases
+
+### Reward Harvesting
+
+Move accumulated rewards from multiple stake accounts to a single account:
+
+```typescript
+async function harvestRewards(
+  connection: Connection,
+  stakeAccounts: PublicKey[],
+  destinationAccount: PublicKey,
+  stakeAuthority: Keypair,
+) {
+  const instructions: TransactionInstruction[] = [];
+  
+  for (const account of stakeAccounts) {
+    const excess = await getExcessLamports(connection, account);
+    if (excess > 0n) {
+      instructions.push(
+        createMoveLamportsInstruction(
+          account,
+          destinationAccount,
+          stakeAuthority.publicKey,
+          excess,
+        )
+      );
+    }
+  }
+  
+  if (instructions.length > 0) {
+    const tx = new Transaction().add(...instructions);
+    await sendAndConfirmTransaction(connection, tx, [stakeAuthority]);
+    console.log(`Harvested rewards from ${instructions.length} accounts`);
+  }
+}
+```
+
+### Rebalancing Stake
+
+Move stake between accounts to rebalance delegation:
+
+```typescript
+async function rebalanceStake(
+  stakeAccounts: { pubkey: PublicKey; targetStake: bigint }[],
+  stakeAuthority: Keypair,
+) {
+  // Calculate current stakes and differences
+  const balances = await Promise.all(
+    stakeAccounts.map(async (acc) => {
+      const info = await connection.getParsedAccountInfo(acc.pubkey);
+      const currentStake = BigInt(info.value?.data.parsed.info.stake?.delegation?.stake || 0);
+      return {
+        ...acc,
+        currentStake,
+        diff: acc.targetStake - currentStake,
+      };
+    })
+  );
+  
+  // Find sources (over target) and destinations (under target)
+  const sources = balances.filter(b => b.diff < 0n);
+  const destinations = balances.filter(b => b.diff > 0n);
+  
+  // Create move instructions
+  // Note: This requires both accounts to be delegated to the same validator
+  // For different validators, you would need to use Split/Merge
+}
+```
+
+---
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InsufficientFunds` | Source doesn't have enough excess lamports |
+| `InvalidAccountData` | Account not a valid stake account |
+| `MissingRequiredSignature` | Stake authority didn't sign |
+| `ActiveStakeNotMatching` | For MoveStake: accounts not delegated to same validator |
+
+## Notes
+
+- `MoveStake` requires both accounts to be fully activated to the same validator
+- `MoveLamports` works with any stake accounts (same authority required)
+- Neither instruction affects lockup status
+- Moving all stake from an account doesn't close it—use Withdraw for that

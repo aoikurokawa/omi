@@ -1,0 +1,63 @@
+---
+title: InitializeChecked
+description: A variant of `Initialize` that requires the withdraw authority to also sign the transaction.
+---
+
+
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 9 |
+| Estimated CU | ~5,200 |
+
+This provides additional safety by ensuring the withdraw authority is aware of and consents to being assigned. No lockup can be set with this instruction.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to initialize |
+| 1 | Rent Sysvar | ❌ | ❌ | `SysvarRent111111111111111111111111111111111` |
+| 2 | Stake Authority | ❌ | ❌ | Authority for delegation operations |
+| 3 | Withdraw Authority | ❌ | ✅ | Authority for withdrawal operations (must sign) |
+
+## Arguments
+
+None (authorities are passed as accounts).
+
+## Example
+
+```typescript
+import { StakeProgram } from '@solana/web3.js';
+
+const initCheckedIx = StakeProgram.initializeChecked({
+  stakePubkey: stakeAccount.publicKey,
+  authorized: {
+    staker: stakeAuthority.publicKey,
+    withdrawer: withdrawAuthority.publicKey,  // Must also sign tx
+  },
+});
+
+const tx = new Transaction().add(createAccountIx, initCheckedIx);
+
+// Both payer and withdrawAuthority must sign
+await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  stakeAccount,
+  withdrawAuthority,  // Required signer
+]);
+```
+
+## When to Use
+
+Use `InitializeChecked` when:
+- Setting up stake accounts for others
+- Requiring explicit consent from the withdraw authority
+- Building secure custodial systems
+
+Use `Initialize` when:
+- You control both authorities
+- You need to set a lockup
+- Simpler transaction structure is preferred

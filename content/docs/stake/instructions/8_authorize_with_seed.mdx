@@ -1,0 +1,59 @@
+---
+title: AuthorizeWithSeed
+description: Authorize using a derived key (Program Derived Address pattern).
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 8 |
+| Estimated CU | ~11,700 |
+
+Allows authorization using a key derived from a base key and seed, useful for deterministic key management.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to modify |
+| 1 | Base Key | ❌ | ✅ | Base key for derivation |
+| 2 | Clock Sysvar | ❌ | ❌ | `SysvarC1ock11111111111111111111111111111111` |
+| 3 | Lockup Authority | ❌ | ✅ | (Optional) Required if lockup active |
+
+## Arguments
+
+```rust
+pub struct AuthorizeWithSeedArgs {
+    pub new_authorized_pubkey: Pubkey,
+    pub stake_authorize: StakeAuthorize,
+    pub authority_seed: String,
+    pub authority_owner: Pubkey,
+}
+```
+
+## Example
+
+```typescript
+import { PublicKey, StakeProgram, StakeAuthorizationType } from '@solana/web3.js';
+
+const seed = 'stake-authority:0';
+const currentAuthority = await PublicKey.createWithSeed(
+  baseKey.publicKey,
+  seed,
+  StakeProgram.programId
+);
+
+const authorizeWithSeedIx = StakeProgram.authorizeWithSeed({
+  stakePubkey: stakeAccountPubkey,
+  authorityBase: baseKey.publicKey,
+  authoritySeed: seed,
+  authorityOwner: StakeProgram.programId,
+  newAuthorizedPubkey: newAuthorityPubkey,
+  stakeAuthorizationType: StakeAuthorizationType.Staker,
+});
+
+// Base key signs (not the derived key)
+const tx = new Transaction().add(authorizeWithSeedIx);
+await sendAndConfirmTransaction(connection, tx, [payer, baseKey]);
+```

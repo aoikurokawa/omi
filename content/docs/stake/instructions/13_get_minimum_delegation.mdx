@@ -1,0 +1,198 @@
+---
+title: GetMinimumDelegation
+description: Query the minimum stake delegation amount.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 13 |
+| Estimated CU | ~negligible |
+
+The `GetMinimumDelegation` instruction returns the minimum amount of lamports that can be delegated to a validator. This value is currently **1 SOL** (1,000,000,000 lamports).
+
+## Accounts
+
+None required.
+
+## Arguments
+
+None.
+
+## Return Value
+
+The instruction returns a `u64` value in little-endian format via the transaction return data mechanism.
+
+## Why Use This?
+
+While the minimum delegation is currently a constant (1 SOL), using this instruction instead of hardcoding ensures your application will remain correct if the minimum changes in the future.
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
+
+async function getMinimumDelegation(connection: Connection): Promise<bigint> {
+  // Create instruction with index 13
+  const data = Buffer.alloc(4);
+  data.writeUInt32LE(13, 0);
+
+  const ix = new TransactionInstruction({
+    keys: [],
+    programId: STAKE_PROGRAM_ID,
+    data,
+  });
+
+  // Simulate to get return data
+  const tx = new Transaction().add(ix);
+  tx.feePayer = new PublicKey('11111111111111111111111111111111'); // Dummy payer
+  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+  const simulation = await connection.simulateTransaction(tx);
+  
+  if (simulation.value.returnData) {
+    const returnData = Buffer.from(simulation.value.returnData.data[0], 'base64');
+    return returnData.readBigUInt64LE(0);
+  }
+  
+  throw new Error('Failed to get minimum delegation');
+}
+
+// Usage
+const minDelegation = await getMinimumDelegation(connection);
+console.log('Minimum delegation:', minDelegation, 'lamports');
+console.log('Minimum delegation:', Number(minDelegation) / 1e9, 'SOL');
+```
+
+### Using Helper Function
+
+The Solana SDK provides a helper function:
+
+```typescript
+import { StakeProgram } from '@solana/web3.js';
+
+// Direct access (if available in your SDK version)
+const minDelegation = await connection.getMinimumBalanceForRentExemption(
+  StakeProgram.space
+) + 1_000_000_000; // rent + 1 SOL minimum delegation
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { getGetMinimumDelegationInstruction } from '@solana-program/stake';
+
+const getMinDelegationIx = getGetMinimumDelegationInstruction();
+
+// Simulate and parse return data
+const simulation = await rpc.simulateTransaction(tx).send();
+const minDelegation = parseReturnData(simulation.returnData);
+```
+
+### Rust
+
+```rust
+use solana_sdk::{
+    instruction::Instruction,
+    stake::program::id as stake_program_id,
+};
+use solana_client::rpc_client::RpcClient;
+
+fn get_minimum_delegation_instruction() -> Instruction {
+    let data = vec![13, 0, 0, 0]; // Instruction index 13
+    
+    Instruction {
+        program_id: stake_program_id(),
+        accounts: vec![],
+        data,
+    }
+}
+
+fn get_minimum_delegation(client: &RpcClient) -> Result<u64, Box<dyn std::error::Error>> {
+    // Using the SDK helper
+    let min_delegation = solana_sdk::stake::state::MINIMUM_DELEGATION;
+    Ok(min_delegation)
+}
+```
+
+### CLI
+
+```bash
+# Query minimum delegation (part of stake account info)
+solana stake-minimum-delegation
+```
+
+---
+
+## Minimum Stake Account Balance
+
+When creating a stake account for delegation, the total balance must be at least:
+
+```
+minimum_balance = rent_exempt_reserve + minimum_delegation
+```
+
+### Calculate Minimum Balance
+
+```typescript
+async function getMinimumStakeAccountBalance(
+  connection: Connection
+): Promise<bigint> {
+  const rentExempt = await connection.getMinimumBalanceForRentExemption(200);
+  const minDelegation = 1_000_000_000n; // 1 SOL
+  
+  return BigInt(rentExempt) + minDelegation;
+}
+
+// Usage
+const minBalance = await getMinimumStakeAccountBalance(connection);
+console.log('Minimum stake account balance:', minBalance, 'lamports');
+// Approximately 1.00228288 SOL on mainnet
+```
+
+---
+
+## Constants Reference
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MINIMUM_DELEGATION` | 1,000,000,000 | Minimum delegatable lamports (1 SOL) |
+| `STAKE_ACCOUNT_SIZE` | 200 | Stake account data size in bytes |
+| `RENT_EXEMPT_RESERVE` | ~2,282,880 | Rent-exempt reserve (varies slightly) |
+
+---
+
+## Program Address
+
+For reference, the Stake Program address:
+
+```typescript
+const STAKE_PROGRAM_ID = 'Stake11111111111111111111111111111111111111';
+```
+
+### Related Sysvars
+
+| Sysvar | Address |
+|--------|---------|
+| Clock | `SysvarC1ock11111111111111111111111111111111` |
+| Rent | `SysvarRent111111111111111111111111111111111` |
+| Stake History | `SysvarStakeHistory1111111111111111111111111` |
+
+### Related Programs
+
+| Program | Address |
+|---------|---------|
+| Stake Config | `StakeConfig11111111111111111111111111111111` |
+| Vote Program | `Vote111111111111111111111111111111111111111` |
+| System Program | `11111111111111111111111111111111` |

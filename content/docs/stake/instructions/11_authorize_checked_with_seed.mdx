@@ -1,0 +1,63 @@
+---
+title: AuthorizeCheckedWithSeed
+description: Combines `AuthorizeWithSeed` and `AuthorizeChecked`.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 11 |
+| Estimated CU | ~11,500 |
+
+Authorizes using a derived key while also requiring the new authority to sign.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to modify |
+| 1 | Base Key | ❌ | ✅ | Base key for derivation |
+| 2 | Clock Sysvar | ❌ | ❌ | `SysvarC1ock11111111111111111111111111111111` |
+| 3 | New Authority | ❌ | ✅ | New authority must sign |
+| 4 | Lockup Authority | ❌ | ✅ | (Optional) Required if lockup active |
+
+## Example
+
+```typescript
+const authorizeCheckedWithSeedIx = StakeProgram.authorizeCheckedWithSeed({
+  stakePubkey: stakeAccountPubkey,
+  authorityBase: baseKey.publicKey,
+  authoritySeed: seed,
+  authorityOwner: StakeProgram.programId,
+  newAuthorizedPubkey: newAuthority.publicKey,
+  stakeAuthorizationType: StakeAuthorizationType.Staker,
+});
+
+// Both base key and new authority must sign
+const tx = new Transaction().add(authorizeCheckedWithSeedIx);
+await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  baseKey,
+  newAuthority,
+]);
+```
+
+---
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `MissingRequiredSignature` | Required signer not present |
+| `InvalidAccountData` | Account not a valid stake account |
+| `LockupInEffect` | Lockup active but custodian not provided |
+| `CustodianMissing` | Changing withdrawer on locked account without custodian |
+
+## Security Best Practices
+
+1. **Use Checked Variants**: When setting up delegation for others, use `AuthorizeChecked` to ensure consent
+2. **Separate Authorities**: Use different keys for stake and withdraw authorities
+3. **Secure Withdraw Authority**: Store withdraw authority in cold storage
+4. **Verify Addresses**: Double-check new authority addresses before signing
+5. **Test First**: Test authority changes on devnet before mainnet

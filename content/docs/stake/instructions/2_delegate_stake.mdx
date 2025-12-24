@@ -1,0 +1,217 @@
+---
+title: DelegateStake
+description: Delegate stake to a validator's vote account.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 2 |
+| Estimated CU | ~10,800 |
+
+The `DelegateStake` instruction delegates all SOL in a stake account (minus rent-exempt reserve) to a validator. The stake begins warming up at the next epoch boundary.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Account | ✅ | ❌ | The stake account to delegate |
+| 1 | Vote Account | ❌ | ❌ | Validator's vote account |
+| 2 | Clock Sysvar | ❌ | ❌ | `SysvarC1ock11111111111111111111111111111111` |
+| 3 | Stake History | ❌ | ❌ | `SysvarStakeHistory1111111111111111111111111` |
+| 4 | Stake Config | ❌ | ❌ | `StakeConfig11111111111111111111111111111111` |
+| 5 | Stake Authority | ❌ | ✅ | Stake authority must sign |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Validates stake account is initialized or already staked
+2. Validates vote account exists and is valid
+3. Sets delegation to the vote account
+4. If already delegated to a different validator, begins re-delegation
+5. Stake starts warming up at the next epoch boundary
+
+### Re-delegation
+
+When calling `DelegateStake` on an already-active stake:
+- Previous delegation is deactivated
+- New delegation begins warming up
+- There may be a period with reduced or no rewards during transition
+
+## Minimum Delegation
+
+The delegated amount must be at least **1 SOL** (1,000,000,000 lamports). The stake account must hold:
+
+```
+minimum_balance = rent_exempt_reserve + 1_000_000_000
+```
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  StakeProgram,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+// Your stake account and authority
+const stakeAccountPubkey = new PublicKey('...');
+const stakeAuthority = /* Keypair or Signer */;
+
+// Validator's vote account
+const validatorVoteAccount = new PublicKey('...');
+
+const delegateIx = StakeProgram.delegate({
+  stakePubkey: stakeAccountPubkey,
+  authorizedPubkey: stakeAuthority.publicKey,
+  votePubkey: validatorVoteAccount,
+});
+
+const tx = new Transaction().add(delegateIx);
+
+const signature = await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  stakeAuthority,
+]);
+
+console.log('Delegated stake:', signature);
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import {
+  getDelegateStakeInstruction,
+  STAKE_CONFIG_ADDRESS,
+} from '@solana-program/stake';
+import {
+  address,
+  CLOCK_SYSVAR_ADDRESS,
+  STAKE_HISTORY_SYSVAR_ADDRESS,
+} from '@solana/kit';
+
+const delegateIx = getDelegateStakeInstruction({
+  stakeAccount: stakeAccountAddress,
+  voteAccount: validatorVoteAddress,
+  stakeAuthority: stakeAuthoritySigner,
+  clock: CLOCK_SYSVAR_ADDRESS,
+  stakeHistory: STAKE_HISTORY_SYSVAR_ADDRESS,
+  stakeConfig: STAKE_CONFIG_ADDRESS,
+});
+```
+
+### Rust
+
+```rust
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    stake::instruction as stake_instruction,
+    transaction::Transaction,
+};
+use solana_client::rpc_client::RpcClient;
+
+fn delegate_stake(
+    client: &RpcClient,
+    payer: &Keypair,
+    stake_account: &Pubkey,
+    stake_authority: &Keypair,
+    vote_account: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let delegate_ix = stake_instruction::delegate_stake(
+        stake_account,
+        &stake_authority.pubkey(),
+        vote_account,
+    );
+
+    let recent_blockhash = client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[delegate_ix],
+        Some(&payer.pubkey()),
+        &[payer, stake_authority],
+        recent_blockhash,
+    );
+
+    let signature = client.send_and_confirm_transaction(&tx)?;
+    println!("Delegation tx: {}", signature);
+
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Delegate stake to a validator
+solana delegate-stake <STAKE_ACCOUNT_ADDRESS> <VOTE_ACCOUNT_ADDRESS>
+
+# With explicit stake authority
+solana delegate-stake <STAKE_ACCOUNT_ADDRESS> <VOTE_ACCOUNT_ADDRESS> \
+  --stake-authority <STAKE_AUTHORITY_KEYPAIR>
+
+# Force delegation (useful on test networks with no votes)
+solana delegate-stake <STAKE_ACCOUNT_ADDRESS> <VOTE_ACCOUNT_ADDRESS> --force
+```
+
+## Finding Validators
+
+### Query Vote Accounts
+
+```typescript
+const { current, delinquent } = await connection.getVoteAccounts();
+
+// Active validators
+for (const validator of current) {
+  console.log('Vote Account:', validator.votePubkey);
+  console.log('Commission:', validator.commission, '%');
+  console.log('Active Stake:', validator.activatedStake);
+}
+```
+
+### Popular Validator Lists
+
+- [Solana Beach](https://solanabeach.io/validators)
+- [Validators.app](https://www.validators.app/)
+- [StakeWiz](https://stakewiz.com/)
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InvalidAccountData` | Stake account not initialized |
+| `InvalidAccountOwner` | Vote account not owned by Vote Program |
+| `InsufficientStake` | Balance below minimum delegation (1 SOL + rent) |
+| `TooSoonToRedelegate` | Re-delegation attempted in same epoch as previous delegation |
+
+## Post-Delegation
+
+After delegation, monitor the activation status:
+
+```typescript
+// Check activation progress
+const activation = await connection.getStakeActivation(stakeAccountPubkey);
+
+console.log('State:', activation.state);
+// 'activating' | 'active' | 'deactivating' | 'inactive'
+
+console.log('Active stake:', activation.active);
+console.log('Inactive stake:', activation.inactive);
+```
+
+## Best Practices
+
+1. **Verify validator**: Check commission, uptime, and stake concentration before delegating
+2. **Timing**: Delegate early in an epoch to begin warmup sooner
+3. **Monitor**: Track activation status and rewards
+4. **Diversify**: Consider splitting stake across multiple validators

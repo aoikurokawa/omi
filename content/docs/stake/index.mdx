@@ -1,0 +1,161 @@
+---
+title: Introduction
+description: Solana's native staking program
+---
+
+The Solana Stake Program enables SOL holders to participate in network security by delegating tokens to validators. Delegators earn rewards proportional to their stake while helping decentralize the network.
+
+| Property | Value |
+|----------|-------|
+| Program Address | `Stake11111111111111111111111111111111111111` |
+| License | Apache-2.0 |
+| Source | [github.com/solana-program/stake](https://github.com/solana-program/stake) |
+
+## Key Features
+
+- **Stake Delegation**: Delegate SOL to validators to earn rewards
+- **Flexible Management**: Split, merge, and transfer stake between accounts
+- **Security Controls**: Separate stake and withdraw authorities for granular access
+- **Lockup Support**: Optional time-based withdrawal restrictions
+- **Permissionless Deactivation**: Anyone can deactivate stake from delinquent validators
+
+## Architecture
+
+The Stake Program was originally a native program built into the Agave validator client. It has been ported to BPF (Berkeley Packet Filter) format, allowing any validator implementation to execute it consistently. This BPF version is live on all Solana clusters.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Stake Account                           │
+├─────────────────────────────────────────────────────────────┤
+│  Meta                                                       │
+│  ├── rent_exempt_reserve: u64                              │
+│  ├── authorized                                            │
+│  │   ├── staker: Pubkey                                    │
+│  │   └── withdrawer: Pubkey                                │
+│  └── lockup                                                │
+│      ├── unix_timestamp: i64                               │
+│      ├── epoch: u64                                        │
+│      └── custodian: Pubkey                                 │
+├─────────────────────────────────────────────────────────────┤
+│  Stake (when delegated)                                     │
+│  ├── delegation                                            │
+│  │   ├── voter_pubkey: Pubkey                              │
+│  │   ├── stake: u64                                        │
+│  │   ├── activation_epoch: u64                             │
+│  │   └── deactivation_epoch: u64                           │
+│  └── credits_observed: u64                                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Stake Account States
+
+A stake account progresses through these states:
+
+| State | Description |
+|-------|-------------|
+| **Uninitialized** | Account exists but has no stake data |
+| **Initialized** | Authorities set, ready for delegation |
+| **Activating** | Delegation submitted, warming up over epochs |
+| **Active** | Fully delegated, earning rewards |
+| **Deactivating** | Deactivation requested, cooling down |
+| **Deactivated** | Fully inactive, can withdraw or re-delegate |
+
+## Minimum Delegation
+
+The minimum stake delegation is **1 SOL** (1,000,000,000 lamports). This minimum also determines the minimum balance for a delegated stake account:
+
+```
+minimum_balance = rent_exempt_reserve + minimum_delegation
+```
+
+
+# Instructions Reference The Stake Program provides 17 instructions for managing stake accounts. Instructions are grouped by function:
+
+## Account Initialization
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Initialize](./initialize.md) | Set up stake account with authorities and lockup | ~7,500 |
+| [InitializeChecked](./initialize.md#initializechecked) | Initialize requiring withdraw authority signature | ~5,200 |
+
+## Delegation Management
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [DelegateStake](./delegate.md) | Delegate stake to a validator | ~10,800 |
+| [Deactivate](./deactivate.md) | Begin deactivation cooldown | ~10,600 |
+| [DeactivateDelinquent](./deactivate.md#deactivatedelinquent) | Permissionless deactivation for abandoned validators | ~11,400 |
+
+## Withdrawal
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Withdraw](./withdraw.md) | Withdraw SOL from stake account | ~7,300 |
+
+## Account Operations
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Split](./split-merge.md#split) | Split stake into a new account | ~16,900 |
+| [Merge](./split-merge.md#merge) | Combine two stake accounts | ~17,600 |
+| [MoveStake](./move.md#movestake) | Transfer stake between accounts | ~21,700 |
+| [MoveLamports](./move.md#movelamports) | Transfer excess lamports | ~12,500 |
+
+## Authority Management
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [Authorize](./authorize.md) | Change stake or withdraw authority | ~10,500 |
+| [AuthorizeChecked](./authorize.md#authorizechecked) | Authorize requiring new authority signature | ~10,200 |
+| [AuthorizeWithSeed](./authorize.md#authorizewithseed) | Authorize using derived key | ~11,700 |
+| [AuthorizeCheckedWithSeed](./authorize.md#authorizecheckedwithseed) | Authorize with seed + new authority signature | ~11,500 |
+
+## Lockup Management
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [SetLockup](./lockup.md) | Modify lockup parameters | ~9,300 |
+| [SetLockupChecked](./lockup.md#setlockupchecked) | Set lockup requiring new custodian signature | ~9,100 |
+
+## Utility
+
+| Instruction | Description | Est. CU |
+|-------------|-------------|---------|
+| [GetMinimumDelegation](./utility.md) | Query minimum delegation amount | ~negligible |
+
+## Compute Unit Notes
+
+The Stake Program was historically "free" at 1,500 CU regardless of operation. As a BPF program, it now consumes actual compute units. The estimates above are baselines from typical invocations—actual usage varies based on account states and arguments.
+
+## Instruction Encoding
+
+All instructions use a 4-byte discriminator followed by instruction-specific data:
+
+```rust
+pub enum StakeInstruction {
+    Initialize(Authorized, Lockup),           // 0
+    Authorize(Pubkey, StakeAuthorize),        // 1
+    DelegateStake,                            // 2
+    Split(u64),                               // 3
+    Withdraw(u64),                            // 4
+    Deactivate,                               // 5
+    SetLockup(LockupArgs),                    // 6
+    Merge,                                    // 7
+    AuthorizeWithSeed(AuthorizeWithSeedArgs), // 8
+    InitializeChecked,                        // 9
+    AuthorizeChecked(StakeAuthorize),         // 10
+    AuthorizeCheckedWithSeed(...),            // 11
+    SetLockupChecked(LockupCheckedArgs),      // 12
+    GetMinimumDelegation,                     // 13
+    DeactivateDelinquent,                     // 14
+    // Redelegate,                            // 15 (deprecated)
+    MoveStake(u64),                           // 16
+    MoveLamports(u64),                        // 17
+}
+```
+
+## Next Steps
+
+- [Stake Accounts](./stake-accounts.md) - Understanding account structure and authorities
+- [Instructions](./instructions/index.md) - Complete instruction reference
+- [Lifecycle](./lifecycle.md) - Warmup, cooldown, and epoch boundaries

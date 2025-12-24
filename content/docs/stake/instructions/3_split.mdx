@@ -1,0 +1,213 @@
+---
+title: Split
+description: Split a stake account into two accounts.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 3 |
+| Estimated CU | ~16,900 |
+
+The `Split` instruction creates a new stake account with a portion of the source account's funds. The new account inherits the delegation state of the source.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Source Stake Account | ✅ | ❌ | Account to split from |
+| 1 | New Stake Account | ✅ | ❌ | Destination for split funds |
+| 2 | Stake Authority | ❌ | ✅ | Stake authority must sign |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount to transfer to new account |
+
+## Constraints
+
+Both the source and destination accounts must maintain valid balances:
+
+```
+minimum_balance = rent_exempt_reserve + minimum_delegation
+
+// Source must retain at least:
+source_remaining >= rent_exempt_reserve + minimum_delegation (if delegated)
+source_remaining >= rent_exempt_reserve (if not delegated)
+
+// Destination must receive at least:
+split_amount >= rent_exempt_reserve + minimum_delegation (if delegated)
+split_amount >= rent_exempt_reserve (if not delegated)
+```
+
+## Behavior
+
+1. Validates source is initialized or staked
+2. Validates destination is uninitialized with correct size
+3. Copies meta (authorities, lockup) to destination
+4. If delegated, copies delegation info to destination
+5. Transfers specified lamports from source to destination
+
+## Examples
+
+### TypeScript (web3.js v1)
+
+```typescript
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  StakeProgram,
+  LAMPORTS_PER_SOL,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+const sourceStake = new PublicKey('...');
+const stakeAuthority = /* Keypair */;
+const newStakeAccount = Keypair.generate();
+
+// Get rent-exempt minimum
+const rentExempt = await connection.getMinimumBalanceForRentExemption(
+  StakeProgram.space
+);
+
+// Amount to split (must cover rent + minimum delegation)
+const splitAmount = rentExempt + 2 * LAMPORTS_PER_SOL;
+
+// Create the new stake account first
+const createAccountIx = SystemProgram.createAccount({
+  fromPubkey: payer.publicKey,
+  newAccountPubkey: newStakeAccount.publicKey,
+  lamports: 0, // Will receive funds from split
+  space: StakeProgram.space,
+  programId: StakeProgram.programId,
+});
+
+// Split instruction
+const splitIx = StakeProgram.split({
+  stakePubkey: sourceStake,
+  authorizedPubkey: stakeAuthority.publicKey,
+  splitStakePubkey: newStakeAccount.publicKey,
+  lamports: splitAmount,
+});
+
+const tx = new Transaction().add(createAccountIx, splitIx);
+
+const signature = await sendAndConfirmTransaction(connection, tx, [
+  payer,
+  stakeAuthority,
+  newStakeAccount,
+]);
+
+console.log('Split complete:', signature);
+console.log('New stake account:', newStakeAccount.publicKey.toBase58());
+```
+
+### TypeScript (@solana-program/stake)
+
+```typescript
+import { 
+  getSplitInstruction,
+  STAKE_ACCOUNT_SIZE,
+  STAKE_PROGRAM_ADDRESS,
+} from '@solana-program/stake';
+import { getCreateAccountInstruction, lamports } from '@solana/kit';
+
+const rentExempt = await rpc.getMinimumBalanceForRentExemption(STAKE_ACCOUNT_SIZE).send();
+const splitAmount = rentExempt + 2_000_000_000n; // rent + 2 SOL
+
+const instructions = [
+  getCreateAccountInstruction({
+    payer,
+    newAccount: newStakeAccountSigner,
+    lamports: lamports(0n),
+    space: STAKE_ACCOUNT_SIZE,
+    programAddress: STAKE_PROGRAM_ADDRESS,
+  }),
+  getSplitInstruction({
+    sourceStakeAccount: sourceStakeAddress,
+    destinationStakeAccount: newStakeAccountSigner.address,
+    stakeAuthority: stakeAuthoritySigner,
+    lamports: lamports(splitAmount),
+  }),
+];
+```
+
+### Rust
+
+```rust
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    stake::instruction as stake_instruction,
+    system_instruction,
+    transaction::Transaction,
+};
+
+fn split_stake(
+    client: &RpcClient,
+    payer: &Keypair,
+    source_stake: &Pubkey,
+    stake_authority: &Keypair,
+    split_amount: u64,
+) -> Result<Pubkey, Box<dyn std::error::Error>> {
+    let new_stake = Keypair::new();
+    
+    let rent_exempt = client.get_minimum_balance_for_rent_exemption(
+        std::mem::size_of::<solana_sdk::stake::state::StakeStateV2>()
+    )?;
+
+    let instructions = vec![
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &new_stake.pubkey(),
+            0, // Will receive from split
+            std::mem::size_of::<solana_sdk::stake::state::StakeStateV2>() as u64,
+            &solana_sdk::stake::program::id(),
+        ),
+        stake_instruction::split(
+            source_stake,
+            &stake_authority.pubkey(),
+            split_amount,
+            &new_stake.pubkey(),
+        )[0].clone(),
+    ];
+
+    let recent_blockhash = client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &instructions,
+        Some(&payer.pubkey()),
+        &[payer, stake_authority, &new_stake],
+        recent_blockhash,
+    );
+
+    client.send_and_confirm_transaction(&tx)?;
+    Ok(new_stake.pubkey())
+}
+```
+
+### CLI
+
+```bash
+# Split 5 SOL into a new stake account
+solana split-stake <SOURCE_STAKE_ADDRESS> <NEW_STAKE_KEYPAIR> 5
+
+# With explicit stake authority
+solana split-stake <SOURCE_STAKE_ADDRESS> <NEW_STAKE_KEYPAIR> 5 \
+  --stake-authority <STAKE_AUTHORITY_KEYPAIR>
+```
+
+## Use Cases
+
+1. **Partial Withdrawal**: Split inactive portion for withdrawal while keeping active stake
+2. **Diversification**: Split stake to delegate to multiple validators
+3. **Liquidity Management**: Access a portion of stake without fully deactivating
+
+---
