@@ -10,7 +10,8 @@ description: Split a stake account into two accounts.
 | Instruction Index | 3 |
 | Estimated CU | ~16,900 |
 
-The `Split` instruction creates a new stake account with a portion of the source account's funds. The new account inherits the delegation state of the source.
+The `Split` instruction creates a new stake account with a portion of the source account's funds.
+The new account inherits the delegation state of the source.
 
 ## Accounts
 
@@ -122,5 +123,3 @@ solana split-stake <SOURCE_STAKE_ADDRESS> <NEW_STAKE_KEYPAIR> 5 \
 1. **Partial Withdrawal**: Split inactive portion for withdrawal while keeping active stake
 2. **Diversification**: Split stake to delegate to multiple validators
 3. **Liquidity Management**: Access a portion of stake without fully deactivating
-
----

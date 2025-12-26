@@ -10,7 +10,8 @@ description: Initialize a stake account with authorized signers and optional loc
 | Instruction Index | 0 |
 | Estimated CU | ~7,500 |
 
-The `Initialize` instruction sets up a stake account's metadata including the stake authority, withdraw authority, and lockup configuration. The account must be created (via System Program) before initialization.
+The `Initialize` instruction sets up a stake account's metadata including the stake authority, withdraw authority, and lockup configuration.
+The account must be created (via System Program) before initialization.
 
 ## Accounts
 
@@ -141,5 +142,3 @@ solana create-stake-account stake-keypair.json 5 \
 |-------|-------|
 | `InvalidAccountData` | Account already initialized |
 | `InsufficientFunds` | Account balance below rent-exempt minimum |
-
----

@@ -10,7 +10,8 @@ description: Permissionless deactivation of stake delegated to delinquent valida
 | Instruction Index | 14 |
 | Estimated CU | ~11,400 |
 
-This instruction allows anyone to deactivate stake that is delegated to a validator that has been delinquent (not voting) for an extended period. No signature from the stake authority is required.
+This instruction allows anyone to deactivate stake that is delegated to a validator that has been delinquent (not voting) for an extended period.
+No signature from the stake authority is required.
 
 ## Purpose
 
@@ -42,7 +43,9 @@ const MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION: u64 = 5;
 
 ## Reference Vote Account
 
-The reference vote account proves that voting is possible on the network. It must have voted within the delinquency threshold. This prevents false positives during network issues.
+The reference vote account proves that voting is possible on the network.
+It must have voted within the delinquency threshold.
+This prevents false positives during network issues.
 
 ## Examples
 

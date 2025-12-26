@@ -10,7 +10,8 @@ description: Begin the deactivation cooldown process for delegated stake.
 | Instruction Index | 5 |
 | Estimated CU | ~10,600 |
 
-The `Deactivate` instruction initiates the cooldown process for stake. Once deactivation completes (after one or more epochs), the stake can be withdrawn.
+The `Deactivate` instruction initiates the cooldown process for stake.
+Once deactivation completes (after one or more epochs), the stake can be withdrawn.
 
 ## Accounts
 
@@ -110,5 +111,3 @@ async function monitorDeactivation(
 |-------|-------|
 | `InvalidAccountData` | Stake account not delegated |
 | `AlreadyDeactivated` | Stake already deactivating or deactivated |
-
----
