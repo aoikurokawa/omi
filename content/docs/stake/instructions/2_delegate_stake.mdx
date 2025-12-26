@@ -52,65 +52,6 @@ minimum_balance = rent_exempt_reserve + 1_000_000_000
 
 ## Examples
 
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-// Your stake account and authority
-const stakeAccountPubkey = new PublicKey('...');
-const stakeAuthority = /* Keypair or Signer */;
-
-// Validator's vote account
-const validatorVoteAccount = new PublicKey('...');
-
-const delegateIx = StakeProgram.delegate({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: stakeAuthority.publicKey,
-  votePubkey: validatorVoteAccount,
-});
-
-const tx = new Transaction().add(delegateIx);
-
-const signature = await sendAndConfirmTransaction(connection, tx, [
-  payer,
-  stakeAuthority,
-]);
-
-console.log('Delegated stake:', signature);
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import {
-  getDelegateStakeInstruction,
-  STAKE_CONFIG_ADDRESS,
-} from '@solana-program/stake';
-import {
-  address,
-  CLOCK_SYSVAR_ADDRESS,
-  STAKE_HISTORY_SYSVAR_ADDRESS,
-} from '@solana/kit';
-
-const delegateIx = getDelegateStakeInstruction({
-  stakeAccount: stakeAccountAddress,
-  voteAccount: validatorVoteAddress,
-  stakeAuthority: stakeAuthoritySigner,
-  clock: CLOCK_SYSVAR_ADDRESS,
-  stakeHistory: STAKE_HISTORY_SYSVAR_ADDRESS,
-  stakeConfig: STAKE_CONFIG_ADDRESS,
-});
-```
-
 ### Rust
 
 ```rust

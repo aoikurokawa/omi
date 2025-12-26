@@ -53,59 +53,6 @@ When both accounts are delegated:
 
 ## Examples
 
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-const destinationStake = new PublicKey('...');
-const sourceStake = new PublicKey('...');
-const stakeAuthority = /* Keypair */;
-
-const mergeIx = StakeProgram.merge({
-  stakePubkey: destinationStake,
-  sourceStakePubkey: sourceStake,
-  authorizedPubkey: stakeAuthority.publicKey,
-});
-
-const tx = new Transaction().add(mergeIx);
-
-const signature = await sendAndConfirmTransaction(connection, tx, [
-  payer,
-  stakeAuthority,
-]);
-
-console.log('Merge complete:', signature);
-// Source account is now closed
-// Destination account has combined balance
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { getMergeInstruction } from '@solana-program/stake';
-import { 
-  CLOCK_SYSVAR_ADDRESS, 
-  STAKE_HISTORY_SYSVAR_ADDRESS 
-} from '@solana/kit';
-
-const mergeIx = getMergeInstruction({
-  destinationStakeAccount: destinationStakeAddress,
-  sourceStakeAccount: sourceStakeAddress,
-  stakeAuthority: stakeAuthoritySigner,
-  clock: CLOCK_SYSVAR_ADDRESS,
-  stakeHistory: STAKE_HISTORY_SYSVAR_ADDRESS,
-});
-```
-
 ### Rust
 
 ```rust
