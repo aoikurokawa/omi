@@ -1,0 +1,432 @@
+---
+title: Stake Pool Lifecycle
+description: Understanding epoch maintenance, stake transitions, and the operational lifecycle of SPL Stake Pools.
+---
+
+## Overview
+
+Stake pools require regular maintenance each epoch to accurately track stake balances, distribute rewards, and manage stake transitions. This guide covers the operational lifecycle of a stake pool.
+
+## Epoch Maintenance
+
+Every epoch, the stake pool must be updated to:
+1. Reconcile validator stake account balances
+2. Calculate and distribute rewards/fees
+3. Process stake transitions (warmup/cooldown)
+4. Clean up removed validators
+
+### Update Sequence
+
+The updates must be called in a specific order:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Epoch N → Epoch N+1                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. UpdateValidatorListBalance (for each batch of validators)  │
+│     ↓                                                          │
+│  2. UpdateStakePoolBalance                                     │
+│     ↓                                                          │
+│  3. CleanupRemovedValidatorEntries (if needed)                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### UpdateValidatorListBalance
+
+Updates the recorded stake for each validator in the pool.
+
+```
+For each validator:
+├── Read actual stake from validator stake account
+├── Read actual stake from transient stake account  
+├── Update active_stake_lamports in validator list
+├── Update transient_stake_lamports in validator list
+├── Merge transient stake if fully activated/deactivated
+└── Update last_update_epoch
+```
+
+**Batching**: Due to compute limits, validators are updated in batches:
+
+```typescript
+const VALIDATORS_PER_TX = 5; // Approximate limit
+
+async function updateAllValidators(
+    connection: Connection,
+    stakePool: PublicKey,
+    validatorCount: number
+) {
+    for (let i = 0; i < validatorCount; i += VALIDATORS_PER_TX) {
+        const tx = createUpdateValidatorListBalanceTx(
+            stakePool,
+            i,                              // start_index
+            false                           // no_merge
+        );
+        await sendTransaction(connection, tx);
+    }
+}
+```
+
+### UpdateStakePoolBalance
+
+Recalculates pool totals and processes epoch fees.
+
+```
+1. Sum all validator stakes (active + transient)
+2. Add reserve stake balance
+3. Calculate total_lamports
+4. Calculate rewards: new_total - last_epoch_total
+5. Mint epoch fee tokens to manager
+6. Update pool_token_supply
+7. Apply pending fee changes
+8. Update last_epoch_* fields
+```
+
+### CleanupRemovedValidatorEntries
+
+Removes validators that have been fully unstaked and marked for removal.
+
+```
+For each validator with status == ReadyForRemoval:
+├── Verify stake accounts have 0 balance
+└── Remove entry from validator list
+```
+
+## Stake Transitions
+
+### Increasing Validator Stake
+
+When the staker increases stake to a validator:
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                 IncreaseValidatorStake Flow                       │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Reserve Account          Transient Account        Validator      │
+│  ┌────────────┐          ┌────────────┐          ┌────────────┐  │
+│  │   100 SOL  │ ──────▶  │   10 SOL   │          │   50 SOL   │  │
+│  │            │  split   │ (warming)  │          │  (active)  │  │
+│  └────────────┘          └────────────┘          └────────────┘  │
+│                                │                                  │
+│                          Next Epoch                               │
+│                                │                                  │
+│                                ▼                                  │
+│                          ┌────────────┐          ┌────────────┐  │
+│                          │ (merge)    │ ──────▶  │   60 SOL   │  │
+│                          └────────────┘          │  (active)  │  │
+│                                                  └────────────┘  │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Decreasing Validator Stake
+
+When the staker decreases stake from a validator:
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                DecreaseValidatorStakeWithReserve Flow             │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Validator Account        Transient Account        Reserve        │
+│  ┌────────────┐          ┌────────────┐          ┌────────────┐  │
+│  │   60 SOL   │ ──────▶  │   10 SOL   │          │   100 SOL  │  │
+│  │  (active)  │  split   │ (cooling)  │          │            │  │
+│  └────────────┘          └────────────┘          └────────────┘  │
+│       │                        │                                  │
+│       ▼                  Next Epoch                               │
+│  ┌────────────┐               │                                  │
+│  │   50 SOL   │               ▼                                  │
+│  │  (active)  │          ┌────────────┐          ┌────────────┐  │
+│  └────────────┘          │ (merge)    │ ──────▶  │   110 SOL  │  │
+│                          └────────────┘          │            │  │
+│                                                  └────────────┘  │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Multiple Operations Per Epoch
+
+For additional stake changes within the same epoch:
+- Use `IncreaseAdditionalValidatorStake` for more increases
+- Use `DecreaseAdditionalValidatorStake` for more decreases
+- These use ephemeral stake accounts for atomic operations
+
+## Deposit Flow
+
+### SOL Deposit
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                      DepositSol Flow                           │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  User Wallet                Reserve              Pool Mint     │
+│  ┌──────────┐              ┌──────────┐        ┌──────────┐   │
+│  │  10 SOL  │ ──────────▶  │  +10 SOL │        │          │   │
+│  └──────────┘   transfer   └──────────┘        └──────────┘   │
+│                                                     │          │
+│                                               mint tokens      │
+│                                                     │          │
+│  User Token Account                                 ▼          │
+│  ┌──────────┐                              ┌──────────────┐   │
+│  │ +9.9 LST │ ◀────────────────────────────│ mint_to user │   │
+│  └──────────┘     (after deposit fee)      └──────────────┘   │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Stake Deposit
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     DepositStake Flow                          │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  User Stake Account        Validator Stake        Pool Mint    │
+│  ┌──────────────┐         ┌──────────────┐      ┌──────────┐  │
+│  │ 10 SOL       │         │   50 SOL     │      │          │  │
+│  │ → Validator A│ ──────▶ │   +10 SOL    │      └──────────┘  │
+│  └──────────────┘  merge  │   = 60 SOL   │           │        │
+│                           └──────────────┘      mint tokens   │
+│                                                      │        │
+│  User Token Account                                  ▼        │
+│  ┌──────────────┐                          ┌──────────────┐   │
+│  │  +9.9 LST    │ ◀────────────────────────│ mint_to user │   │
+│  └──────────────┘    (after deposit fee)   └──────────────────┘│
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Withdrawal Flow
+
+### SOL Withdrawal
+
+Only available if sufficient reserve:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     WithdrawSol Flow                           │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  User Token Account        Pool Mint            Reserve        │
+│  ┌──────────────┐        ┌──────────┐        ┌──────────┐     │
+│  │   10 LST     │ ────▶  │   burn   │        │  100 SOL │     │
+│  │   -10 LST    │        └──────────┘        └──────────┘     │
+│  └──────────────┘                                  │          │
+│                                              transfer SOL     │
+│                                                    │          │
+│  User Wallet                                       ▼          │
+│  ┌──────────────┐                          ┌──────────┐       │
+│  │   +9.9 SOL   │ ◀────────────────────────│ -9.9 SOL │       │
+│  └──────────────┘   (after withdrawal fee) └──────────┘       │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Stake Withdrawal
+
+User receives a stake account (may need deactivation):
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    WithdrawStake Flow                          │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  User Token Account      Validator Stake       User Receives   │
+│  ┌──────────────┐       ┌──────────────┐      ┌──────────────┐│
+│  │   10 LST     │       │   60 SOL     │      │  New Stake   ││
+│  │   -10 LST    │       │   split      │ ───▶ │  Account     ││
+│  └──────────────┘       │   -10 SOL    │      │  10 SOL      ││
+│        │                └──────────────┘      │  (delegated) ││
+│        ▼                                      └──────────────┘│
+│  ┌──────────────┐                                             │
+│  │ Pool: burn   ���                                             │
+│  └──────────────┘                                             │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Adding Validators
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                  AddValidatorToPool Flow                       │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  1. Validate vote account exists and is valid                  │
+│  2. Derive validator stake account PDA                         │
+│  3. Create validator stake account                             │
+│  4. Initialize with pool's withdraw authority                  │
+│  5. Add entry to validator list                                │
+│                                                                │
+│  Validator List                    New Stake Account           │
+│  ┌─────────────────┐              ┌─────────────────┐         │
+│  │ Validator A     │              │ PDA for         │         │
+│  │ Validator B     │              │ Validator C     │         │
+│  │ + Validator C   │ ◀──────────▶ │ (empty, init)   │         │
+│  └─────────────────┘              └─────────────────┘         │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Removing Validators
+
+Removal is a multi-step process across epochs:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                RemoveValidatorFromPool Flow                    │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Epoch N: Remove requested                                     │
+│  ┌──────────────────────────────────────────────────────┐     │
+│  │ 1. Validator stake deactivated                        │     │
+│  │ 2. Status → DeactivatingValidator                     │     │
+│  └──────────────────────────────────────────────────────┘     │
+│                           │                                    │
+│                     Epoch N+1                                  │
+│                           ▼                                    │
+│  ┌──────────────────────────────────────────────────────┐     │
+│  │ 3. UpdateValidatorListBalance merges deactivated      │     │
+│  │    stake back to reserve                              │     │
+│  │ 4. Status → ReadyForRemoval                           │     │
+│  └──────────────────────────────────────────────────────┘     │
+│                           │                                    │
+│                     Epoch N+2                                  │
+│                           ▼                                    │
+│  ┌──────────────────────────────────────────────────────┐     │
+│  │ 5. CleanupRemovedValidatorEntries removes entry       │     │
+│  └──────────────────────────────────────────────────────┘     │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Exchange Rate Evolution
+
+The LST exchange rate changes each epoch based on rewards:
+
+```
+                  Exchange Rate Over Time
+                  
+Rate │                                    ╭───
+     │                              ╭─────╯
+     │                        ╭─────╯
+     │                  ╭─────╯
+     │            ╭─────╯
+     │      ╭─────╯
+     │ ─────╯
+     │
+     └────────────────────────────────────────▶ Epochs
+     
+     Each step = Staking rewards added to pool
+                 (minus epoch fee)
+```
+
+### Calculating Exchange Rate
+
+```typescript
+function getExchangeRate(stakePool: StakePool): number {
+    if (stakePool.poolTokenSupply === 0n) {
+        return 1.0;
+    }
+    return Number(stakePool.totalLamports) / 
+           Number(stakePool.poolTokenSupply);
+}
+
+// SOL value of LST tokens
+function getLstValue(lstAmount: bigint, stakePool: StakePool): bigint {
+    return (lstAmount * stakePool.totalLamports) / 
+           stakePool.poolTokenSupply;
+}
+
+// LST tokens received for SOL deposit
+function getDepositQuote(solAmount: bigint, stakePool: StakePool): bigint {
+    if (stakePool.totalLamports === 0n) {
+        return solAmount;
+    }
+    return (solAmount * stakePool.poolTokenSupply) / 
+           stakePool.totalLamports;
+}
+```
+
+## Best Practices
+
+### For Pool Operators
+
+1. **Update Every Epoch**: Run maintenance at the start of each epoch
+2. **Monitor Validators**: Track validator performance and adjust stake
+3. **Maintain Reserve**: Keep sufficient reserve for SOL withdrawals
+4. **Fee Changes**: Communicate fee changes to stakers in advance
+
+### For Integrators
+
+1. **Check Exchange Rate**: Get current rate before deposits/withdrawals
+2. **Use Slippage Protection**: Use `*WithSlippage` variants
+3. **Handle Warmup**: Account for stake warmup in UX
+4. **Monitor Pool Health**: Check pool's validator distribution
+
+### For Users
+
+1. **Compare Pools**: Evaluate fees, validator sets, and track records
+2. **Understand LST Value**: LST value grows with staking rewards
+3. **Withdrawal Options**: SOL withdrawal is instant if reserve available
+4. **Stake Withdrawals**: May receive delegated stake needing deactivation
+
+## Common Patterns
+
+### Automated Epoch Updates
+
+```typescript
+async function runEpochMaintenance(
+    connection: Connection,
+    stakePool: StakePool
+) {
+    const currentEpoch = (await connection.getEpochInfo()).epoch;
+    
+    if (stakePool.lastUpdateEpoch >= currentEpoch) {
+        console.log('Pool already updated this epoch');
+        return;
+    }
+    
+    // 1. Update all validators
+    const validatorCount = await getValidatorCount(stakePool.validatorList);
+    for (let i = 0; i < validatorCount; i += 5) {
+        await updateValidatorListBalance(stakePool, i, false);
+    }
+    
+    // 2. Update pool balance
+    await updateStakePoolBalance(stakePool);
+    
+    // 3. Cleanup if needed
+    await cleanupRemovedValidatorEntries(stakePool);
+    
+    console.log(`Pool updated for epoch ${currentEpoch}`);
+}
+```
+
+### Rebalancing Stake
+
+```typescript
+async function rebalanceStake(
+    stakePool: StakePool,
+    targetDistribution: Map<Pubkey, number> // validator -> percentage
+) {
+    const totalStake = stakePool.totalLamports;
+    
+    for (const [validator, targetPct] of targetDistribution) {
+        const targetStake = (totalStake * BigInt(targetPct)) / 100n;
+        const currentStake = await getValidatorStake(validator);
+        
+        const diff = targetStake - currentStake;
+        
+        if (diff > MIN_REBALANCE_AMOUNT) {
+            await increaseValidatorStake(stakePool, validator, diff);
+        } else if (diff < -MIN_REBALANCE_AMOUNT) {
+            await decreaseValidatorStake(stakePool, validator, -diff);
+        }
+    }
+}
+```

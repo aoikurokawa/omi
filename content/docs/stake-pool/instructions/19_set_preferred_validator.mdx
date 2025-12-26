@@ -1,0 +1,148 @@
+---
+title: SetPreferredValidator
+description: Set the preferred validator for deposits or withdrawals.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 19 |
+| Required Authority | Manager |
+
+The `SetPreferredValidator` instruction sets a preferred validator for deposit or withdrawal operations. When set, the pool will preferentially route operations through this validator.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+| 2 | Validator List | ❌ | ❌ | Pool's validator list account |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `validator_type` | `PreferredValidatorType` | Deposit or Withdraw |
+| `validator_vote_address` | `Option<Pubkey>` | Validator vote account (None to clear) |
+
+```rust
+pub enum PreferredValidatorType {
+    Deposit,
+    Withdraw,
+}
+```
+
+## Behavior
+
+1. Validates manager signature
+2. If vote address provided:
+   - Validates validator is in the pool
+   - Sets as preferred for the specified operation type
+3. If None:
+   - Clears the preferred validator
+
+## Effects
+
+### Preferred Deposit Validator
+
+When set, `DepositStake` operations:
+- Must deposit to the preferred validator
+- Stake must already be delegated to that validator
+
+### Preferred Withdraw Validator
+
+When set, `WithdrawStake` operations:
+- Will withdraw from preferred validator first
+- Only after it's depleted will other validators be used
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::{set_preferred_validator, PreferredValidatorType};
+
+fn set_preferred_deposit_validator(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    vote_account: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let ix = set_preferred_validator(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        &stake_pool_data.validator_list,
+        PreferredValidatorType::Deposit,
+        Some(*vote_account),
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Set preferred deposit validator: {}", vote_account);
+    Ok(())
+}
+
+fn clear_preferred_validator(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let ix = set_preferred_validator(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        &stake_pool_data.validator_list,
+        PreferredValidatorType::Deposit,
+        None, // Clear preference
+    );
+    
+    // ... send transaction
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Set preferred deposit validator
+spl-stake-pool set-preferred-validator <POOL_ADDRESS> deposit \
+    --vote-account <VOTE_ACCOUNT>
+
+# Set preferred withdraw validator
+spl-stake-pool set-preferred-validator <POOL_ADDRESS> withdraw \
+    --vote-account <VOTE_ACCOUNT>
+
+# Clear preferred deposit validator
+spl-stake-pool set-preferred-validator <POOL_ADDRESS> deposit --unset
+
+# Clear preferred withdraw validator
+spl-stake-pool set-preferred-validator <POOL_ADDRESS> withdraw --unset
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+| `ValidatorNotFound` | Validator not in pool |
+
+## Use Cases
+
+1. **Bootstrap New Validator**: Direct deposits to build stake
+2. **Controlled Withdrawals**: Reduce specific validator's stake
+3. **Concentration Management**: Limit exposure to specific validators

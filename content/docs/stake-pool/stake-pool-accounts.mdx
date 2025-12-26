@@ -1,0 +1,497 @@
+---
+title: Stake Pool Accounts
+description: Understanding the account structures used by the SPL Stake Pool program for liquid staking.
+---
+
+## Overview
+
+The SPL Stake Pool program uses multiple account types to manage pooled staking. Each account type serves a specific purpose in the liquid staking architecture.
+
+## Stake Pool Account
+
+The main account that stores pool configuration and state.
+
+### Structure
+
+```rust
+pub struct StakePool {
+    /// Account type, must be StakePool
+    pub account_type: AccountType,
+
+    /// Manager authority, can modify pool settings
+    pub manager: Pubkey,
+
+    /// Staker authority, manages stake distribution
+    pub staker: Pubkey,
+
+    /// Stake deposit authority (PDA)
+    pub stake_deposit_authority: Pubkey,
+
+    /// Bump seed for withdraw authority PDA
+    pub stake_withdraw_bump_seed: u8,
+
+    /// Validator list account address
+    pub validator_list: Pubkey,
+
+    /// Reserve stake account address
+    pub reserve_stake: Pubkey,
+
+    /// Pool token mint address
+    pub pool_mint: Pubkey,
+
+    /// Manager's fee account (receives fees)
+    pub manager_fee_account: Pubkey,
+
+    /// Token program used (Token or Token-2022)
+    pub token_program_id: Pubkey,
+
+    /// Total lamports staked across all validators
+    pub total_lamports: u64,
+
+    /// Total pool tokens minted
+    pub pool_token_supply: u64,
+
+    /// Last epoch this pool was updated
+    pub last_update_epoch: u64,
+
+    /// Lockup applied to all stake accounts
+    pub lockup: Lockup,
+
+    /// Fee taken from staking rewards each epoch
+    pub epoch_fee: Fee,
+
+    /// Pending epoch fee (takes effect next epoch)
+    pub next_epoch_fee: FutureEpoch<Fee>,
+
+    /// Preferred validator for deposits
+    pub preferred_deposit_validator: Option<Pubkey>,
+
+    /// Preferred validator for withdrawals
+    pub preferred_withdraw_validator: Option<Pubkey>,
+
+    /// Fee on stake account deposits
+    pub stake_deposit_fee: Fee,
+
+    /// Fee on stake withdrawals
+    pub stake_withdrawal_fee: Fee,
+
+    /// Pending stake withdrawal fee
+    pub next_stake_withdrawal_fee: FutureEpoch<Fee>,
+
+    /// Referral fee (% of stake deposit fee)
+    pub stake_referral_fee: u8,
+
+    /// Optional authority for SOL deposits
+    pub sol_deposit_authority: Option<Pubkey>,
+
+    /// Fee on SOL deposits
+    pub sol_deposit_fee: Fee,
+
+    /// Referral fee (% of SOL deposit fee)
+    pub sol_referral_fee: u8,
+
+    /// Optional authority for SOL withdrawals
+    pub sol_withdraw_authority: Option<Pubkey>,
+
+    /// Fee on SOL withdrawals
+    pub sol_withdrawal_fee: Fee,
+
+    /// Pending SOL withdrawal fee
+    pub next_sol_withdrawal_fee: FutureEpoch<Fee>,
+
+    /// Pool token supply at last epoch
+    pub last_epoch_pool_token_supply: u64,
+
+    /// Total lamports at last epoch
+    pub last_epoch_total_lamports: u64,
+}
+```
+
+### Account Size
+
+The stake pool account requires approximately **611 bytes** of space.
+
+## Validator List Account
+
+Tracks all validators in the pool and their stake amounts.
+
+### Structure
+
+```rust
+pub struct ValidatorList {
+    /// Header with metadata
+    pub header: ValidatorListHeader,
+
+    /// List of validator stake info
+    pub validators: Vec<ValidatorStakeInfo>,
+}
+
+pub struct ValidatorListHeader {
+    /// Account type, must be ValidatorList
+    pub account_type: AccountType,
+
+    /// Maximum number of validators
+    pub max_validators: u32,
+}
+
+pub struct ValidatorStakeInfo {
+    /// Validator's vote account address
+    pub vote_account_address: Pubkey,
+
+    /// Active stake delegated to this validator
+    pub active_stake_lamports: u64,
+
+    /// Stake in transient accounts (warming up/cooling down)
+    pub transient_stake_lamports: u64,
+
+    /// Last epoch this validator was updated
+    pub last_update_epoch: u64,
+
+    /// Seed suffix for transient stake PDA
+    pub transient_seed_suffix: u64,
+
+    /// Reserved for future use
+    pub unused: u32,
+
+    /// Seed suffix for validator stake PDA
+    pub validator_seed_suffix: u32,
+
+    /// Current stake status
+    pub status: StakeStatus,
+}
+```
+
+### Stake Status
+
+```rust
+pub enum StakeStatus {
+    /// Validator is actively staking
+    Active,
+
+    /// Transient stake is deactivating
+    DeactivatingTransient,
+
+    /// All stake deactivated, can be removed
+    ReadyForRemoval,
+
+    /// Validator stake is deactivating
+    DeactivatingValidator,
+
+    /// Both validator and transient stake deactivating
+    DeactivatingAll,
+}
+```
+
+### Account Size Calculation
+
+```rust
+// Header size
+const HEADER_SIZE: usize = 1 + 4; // account_type + max_validators
+
+// Each validator entry
+const VALIDATOR_STAKE_INFO_SIZE: usize = 73;
+
+// Total size
+fn validator_list_size(max_validators: u32) -> usize {
+    HEADER_SIZE + (max_validators as usize * VALIDATOR_STAKE_INFO_SIZE)
+}
+```
+
+## Reserve Stake Account
+
+A stake account that holds undelegated SOL. Used for:
+- Receiving SOL deposits before delegation
+- Holding stake returned from validators
+- Servicing SOL withdrawal requests
+
+### Requirements
+
+- Must be a stake account owned by the Stake Program
+- Withdraw authority must be the pool's withdraw authority PDA
+- Should be initialized but not delegated
+
+## Pool Token Mint
+
+The SPL Token mint for the pool's liquid staking token (LST).
+
+### Requirements
+
+- Must be owned by Token Program or Token-2022
+- Mint authority must be the pool's withdraw authority PDA
+- Freeze authority must be disabled (set to None)
+- Decimals are typically 9 (matching SOL)
+
+### Token-2022 Support
+
+The stake pool supports Token-2022 with certain extensions:
+- **Supported**: Transfer fees, metadata, interest-bearing
+- **Not Supported**: Non-transferable, permanent delegate
+
+## Validator Stake Accounts
+
+PDAs that hold delegated stake for each validator.
+
+### Address Derivation
+
+```rust
+fn find_stake_program_address(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    stake_pool: &Pubkey,
+    seed: Option<NonZeroU32>,
+) -> (Pubkey, u8) {
+    let mut seeds = vec![
+        vote_account.as_ref(),
+        stake_pool.as_ref(),
+        b"validator",
+    ];
+    
+    if let Some(s) = seed {
+        seeds.push(&s.get().to_le_bytes());
+    }
+    
+    Pubkey::find_program_address(&seeds, program_id)
+}
+```
+
+### Structure
+
+These are standard Solana stake accounts with:
+- **Stake Authority**: Pool's withdraw authority PDA
+- **Withdraw Authority**: Pool's withdraw authority PDA
+- **Delegation**: To the validator's vote account
+
+## Transient Stake Accounts
+
+Temporary stake accounts for stake in transition (warming up or cooling down).
+
+### Address Derivation
+
+```rust
+fn find_transient_stake_program_address(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    stake_pool: &Pubkey,
+    seed: u64,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            b"transient",
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            &seed.to_le_bytes(),
+        ],
+        program_id,
+    )
+}
+```
+
+### Lifecycle
+
+1. **Created**: When increasing/decreasing validator stake
+2. **Warming Up**: New delegation activating over epochs
+3. **Cooling Down**: Deactivated stake waiting to become withdrawable
+4. **Merged/Removed**: After reaching target state
+
+## Ephemeral Stake Accounts
+
+Temporary accounts used within a single transaction for complex stake operations.
+
+### Address Derivation
+
+```rust
+fn find_ephemeral_stake_program_address(
+    program_id: &Pubkey,
+    stake_pool: &Pubkey,
+    seed: u64,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            b"ephemeral",
+            stake_pool.as_ref(),
+            &seed.to_le_bytes(),
+        ],
+        program_id,
+    )
+}
+```
+
+### Use Cases
+
+- Splitting stake for withdrawal
+- Intermediate account for redelegation
+- Facilitating atomic multi-step operations
+
+## Fee Structure
+
+```rust
+pub struct Fee {
+    /// Fee numerator
+    pub numerator: u64,
+    /// Fee denominator
+    pub denominator: u64,
+}
+
+impl Fee {
+    /// Calculate fee for a given amount
+    pub fn apply(&self, amount: u64) -> Option<u64> {
+        if self.denominator == 0 {
+            return Some(0);
+        }
+        u64::try_from(
+            (amount as u128)
+                .checked_mul(self.numerator as u128)?
+                .checked_div(self.denominator as u128)?
+        ).ok()
+    }
+}
+```
+
+### Fee Examples
+
+| Numerator | Denominator | Percentage |
+|-----------|-------------|------------|
+| 1 | 100 | 1% |
+| 5 | 1000 | 0.5% |
+| 0 | 1 | 0% |
+| 1 | 10 | 10% |
+
+## Future Epoch Wrapper
+
+Used for delayed fee changes to protect stakers:
+
+```rust
+pub enum FutureEpoch<T> {
+    /// No pending change
+    None,
+    
+    /// Change takes effect after one more epoch
+    One(T),
+    
+    /// Change takes effect after two more epochs
+    Two(T),
+}
+```
+
+### Fee Change Flow
+
+```
+Epoch N: Manager calls SetFee
+         next_withdrawal_fee = FutureEpoch::Two(new_fee)
+         
+Epoch N+1: UpdateStakePoolBalance called
+           next_withdrawal_fee = FutureEpoch::One(new_fee)
+           
+Epoch N+2: UpdateStakePoolBalance called
+           withdrawal_fee = new_fee
+           next_withdrawal_fee = FutureEpoch::None
+```
+
+## Querying Accounts
+
+### Get Stake Pool State
+
+```typescript
+import { Connection, PublicKey } from '@solana/web3.js';
+
+async function getStakePool(
+    connection: Connection,
+    stakePoolAddress: PublicKey
+) {
+    const accountInfo = await connection.getAccountInfo(stakePoolAddress);
+    if (!accountInfo) {
+        throw new Error('Stake pool not found');
+    }
+    
+    // Decode using @solana/spl-stake-pool
+    // const stakePool = StakePoolLayout.decode(accountInfo.data);
+    return accountInfo;
+}
+```
+
+### Get Validator List
+
+```typescript
+async function getValidatorList(
+    connection: Connection,
+    validatorListAddress: PublicKey
+) {
+    const accountInfo = await connection.getAccountInfo(validatorListAddress);
+    if (!accountInfo) {
+        throw new Error('Validator list not found');
+    }
+    
+    // Parse header
+    const accountType = accountInfo.data[0];
+    const maxValidators = accountInfo.data.readUInt32LE(1);
+    
+    // Parse validators starting at offset 5
+    const validators = [];
+    const ENTRY_SIZE = 73;
+    let offset = 5;
+    
+    while (offset + ENTRY_SIZE <= accountInfo.data.length) {
+        const entry = accountInfo.data.slice(offset, offset + ENTRY_SIZE);
+        // Parse ValidatorStakeInfo from entry...
+        offset += ENTRY_SIZE;
+    }
+    
+    return { maxValidators, validators };
+}
+```
+
+### Find All Pool Stake Accounts
+
+```typescript
+async function findPoolStakeAccounts(
+    connection: Connection,
+    stakePoolAddress: PublicKey,
+    withdrawAuthority: PublicKey
+) {
+    const STAKE_PROGRAM_ID = new PublicKey(
+        'Stake11111111111111111111111111111111111111'
+    );
+    
+    // Find all stake accounts with pool's withdraw authority
+    const accounts = await connection.getParsedProgramAccounts(
+        STAKE_PROGRAM_ID,
+        {
+            filters: [
+                { dataSize: 200 },
+                {
+                    memcmp: {
+                        offset: 44, // withdrawer offset
+                        bytes: withdrawAuthority.toBase58(),
+                    },
+                },
+            ],
+        }
+    );
+    
+    return accounts;
+}
+```
+
+## Security Considerations
+
+### Authority Separation
+
+- **Manager** controls pool settings but cannot access funds
+- **Staker** can only move stake between validators
+- **Withdraw Authority** (PDA) is the only account that can move funds
+
+### Validation Checks
+
+The program validates:
+- All PDAs are correctly derived
+- Authorities match expected values
+- Account owners are correct programs
+- Balances are sufficient
+- Fee constraints are respected
+
+### Rent Exemption
+
+All accounts must maintain rent-exempt balances:
+- Stake Pool: ~611 bytes
+- Validator List: 5 + (73 × max_validators) bytes
+- Stake Accounts: 200 bytes each

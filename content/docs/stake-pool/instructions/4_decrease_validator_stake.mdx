@@ -1,0 +1,229 @@
+---
+title: DecreaseValidatorStakeWithReserve
+description: Remove stake from a validator and return it to the reserve.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 4 |
+| Required Authority | Staker |
+
+The `DecreaseValidatorStakeWithReserve` instruction (also known as `DecreaseValidatorStake`) moves stake from a validator back to the pool's reserve. The stake enters a cooldown period before becoming available.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 4 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 5 | Validator Stake Account | ✅ | ❌ | Validator's main stake PDA |
+| 6 | Transient Stake Account | ✅ | ❌ | Validator's transient stake PDA |
+| 7 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 8 | Rent Sysvar | ❌ | ❌ | Rent sysvar |
+| 9 | System Program | ❌ | ❌ | System program |
+| 10 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount of lamports to unstake |
+| `transient_stake_seed` | u64 | Seed for transient stake PDA |
+
+## Behavior
+
+1. Validates staker authority signature
+2. Checks validator is active in the pool
+3. Checks validator has sufficient active stake
+4. Splits `lamports` from validator stake to transient stake account
+5. Deactivates the transient stake
+6. Updates validator's `transient_stake_lamports` in validator list
+7. Sets validator status to `DeactivatingTransient`
+
+## Stake Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              DecreaseValidatorStakeWithReserve Flow             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Validator Stake           Transient Stake                      │
+│  ┌────────────┐            ┌────────────┐                      │
+│  │  50 SOL    │            │            │                      │
+│  │  (active)  │ ──split──▶ │  +10 SOL   │                      │
+│  │  -10 SOL   │            │ (deactivate)                      │
+│  └────────────┘            └────────────┘                      │
+│                                  │                              │
+│                          Epoch Boundary                         │
+│                                  │ (cooldown)                   │
+│                                  ▼                              │
+│  Reserve Stake             Transient Stake                      │
+│  ┌────────────┐            ┌────────────┐                      │
+│  │  +10 SOL   │ ◀──merge── │   (empty)  │                      │
+│  │            │            │            │                      │
+│  └────────────┘            └────────────┘                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::decrease_validator_stake_with_reserve;
+
+fn decrease_stake(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    staker: &Keypair,
+    vote_account: &Pubkey,
+    lamports: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    let validator_info = find_validator_info(&stake_pool_data, vote_account)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (validator_stake, _) = Pubkey::find_program_address(
+        &[
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            b"validator",
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    // Use a new seed for the transient stake
+    let transient_seed = validator_info.transient_seed_suffix + 1;
+    let (transient_stake, _) = Pubkey::find_program_address(
+        &[
+            b"transient",
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            &transient_seed.to_le_bytes(),
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    let decrease_ix = decrease_validator_stake_with_reserve(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &staker.pubkey(),
+        &withdraw_authority,
+        &stake_pool_data.validator_list,
+        &stake_pool_data.reserve_stake,
+        &validator_stake,
+        &transient_stake,
+        lamports,
+        transient_seed,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[decrease_ix],
+        Some(&staker.pubkey()),
+        &[staker],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Decreased stake from {} by {} lamports", vote_account, lamports);
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Decrease stake from a validator by 10 SOL
+spl-stake-pool decrease-validator-stake <POOL_ADDRESS> <VOTE_ACCOUNT> 10
+
+# With custom staker keypair
+spl-stake-pool decrease-validator-stake <POOL_ADDRESS> <VOTE_ACCOUNT> 10 \
+    --staker staker.json
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker did not sign |
+| `ValidatorNotFound` | Validator not in pool |
+| `InsufficientFunds` | Validator has less stake than requested |
+| `StakeListOutOfDate` | Validator list needs update |
+| `WrongStakeState` | Transient stake already in use |
+
+## Minimum Stake
+
+Validators must maintain minimum stake after decrease:
+
+```typescript
+const MINIMUM_ACTIVE_STAKE = 1_000_000; // 0.001 SOL
+
+// Check before decreasing
+const maxDecrease = validatorInfo.activeStakeLamports - MINIMUM_ACTIVE_STAKE;
+
+if (desiredDecrease > maxDecrease) {
+    console.log('Cannot decrease below minimum, use RemoveValidatorFromPool');
+}
+```
+
+## Cooldown Period
+
+After decreasing stake:
+
+1. **Transient Account Created**: Stake moves to transient account
+2. **Deactivation**: Stake begins cooling down
+3. **Merge on Update**: `UpdateValidatorListBalance` merges to reserve
+
+```typescript
+// Monitor validator status
+const validatorInfo = await getValidatorStakeInfo(pool, voteAccount);
+
+switch (validatorInfo.status) {
+    case 'Active':
+        console.log('No pending operations');
+        break;
+    case 'DeactivatingTransient':
+        console.log('Transient stake cooling down');
+        console.log('Transient amount:', validatorInfo.transientStakeLamports);
+        break;
+}
+```
+
+## Multiple Decreases
+
+For multiple stake decreases in the same epoch, use `DecreaseAdditionalValidatorStake`:
+
+```rust
+// First decrease
+decrease_validator_stake_with_reserve(pool, validator, 10_000_000_000);
+
+// Additional decrease (same epoch) - uses ephemeral stake
+decrease_additional_validator_stake(pool, validator, 5_000_000_000);
+```
+
+## Best Practices
+
+1. **Check Validator Stake**: Ensure validator has enough active stake
+2. **Consider Minimum**: Keep minimum stake or remove validator entirely
+3. **Monitor Cooldown**: Track transient stake through deactivation
+4. **Update After Epoch**: Run maintenance to merge to reserve
+
+## Impact on Pool
+
+| Metric | Effect |
+|--------|--------|
+| **Validator Stake** | Decreases by `lamports` |
+| **Reserve Balance** | Increases after cooldown |
+| **Total Pool Stake** | Unchanged |
+| **Exchange Rate** | Unchanged |

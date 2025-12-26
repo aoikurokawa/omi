@@ -1,0 +1,233 @@
+---
+title: UpdateStakePoolBalance
+description: Update the stake pool's total balance and distribute epoch fees.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 6 |
+| Required Authority | None (permissionless) |
+
+The `UpdateStakePoolBalance` instruction recalculates the pool's total stake, distributes epoch fees to the manager, and applies pending fee changes. Must be called after `UpdateValidatorListBalance`.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 2 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 3 | Reserve Stake | ❌ | ❌ | Pool's reserve stake account |
+| 4 | Manager Fee Account | ✅ | ❌ | Manager's token account for fees |
+| 5 | Pool Mint | ✅ | ❌ | Pool token mint |
+| 6 | Token Program | ❌ | ❌ | SPL Token program |
+| 7 | (Optional) Sol Deposit Authority | ❌ | ❌ | If SOL deposits are restricted |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Validates all validators have been updated this epoch
+2. Calculates new total stake:
+   - Sum of all validator active stakes
+   - Plus all validator transient stakes
+   - Plus reserve stake balance
+3. Calculates epoch rewards:
+   - `rewards = new_total - last_epoch_total`
+4. Calculates and mints epoch fee tokens to manager:
+   - `fee_tokens = rewards × epoch_fee × (pool_token_supply / total_lamports)`
+5. Updates pool state:
+   - `total_lamports = new_total`
+   - `pool_token_supply += fee_tokens`
+   - `last_update_epoch = current_epoch`
+   - `last_epoch_total_lamports = new_total`
+   - `last_epoch_pool_token_supply = pool_token_supply`
+6. Applies pending fee changes (advances `FutureEpoch` states)
+
+## Fee Calculation
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Epoch Fee Distribution                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Last Epoch Total: 1,000,000 SOL                                │
+│  New Total:        1,010,000 SOL                                │
+│  Rewards:             10,000 SOL                                │
+│                                                                 │
+│  Epoch Fee: 5/100 (5%)                                         │
+│  Manager's Share: 10,000 × 0.05 = 500 SOL worth                │
+│                                                                 │
+│  Pool Token Supply: 1,000,000 tokens                            │
+│  Exchange Rate: 1.0 SOL per token                               │
+│                                                                 │
+│  Fee Tokens Minted: 500 tokens                                  │
+│  New Pool Token Supply: 1,000,500 tokens                        │
+│  New Exchange Rate: 1,010,000 / 1,000,500 ≈ 1.0095              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::update_stake_pool_balance;
+
+fn update_pool_balance(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let update_ix = update_stake_pool_balance(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &withdraw_authority,
+        &stake_pool_data.validator_list,
+        &stake_pool_data.reserve_stake,
+        &stake_pool_data.manager_fee_account,
+        &stake_pool_data.pool_mint,
+        &stake_pool_data.token_program_id,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[update_ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Updated stake pool balance");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Update stake pool balance (usually called by 'update' command)
+spl-stake-pool update <POOL_ADDRESS>
+```
+
+## Fee Change Application
+
+Pending fee changes advance each epoch:
+
+```
+Epoch N: SetFee called
+         next_epoch_fee = FutureEpoch::Two(new_fee)
+
+Epoch N+1: UpdateStakePoolBalance
+           next_epoch_fee = FutureEpoch::One(new_fee)
+
+Epoch N+2: UpdateStakePoolBalance
+           epoch_fee = new_fee
+           next_epoch_fee = FutureEpoch::None
+```
+
+This applies to:
+- `epoch_fee` / `next_epoch_fee`
+- `stake_withdrawal_fee` / `next_stake_withdrawal_fee`
+- `sol_withdrawal_fee` / `next_sol_withdrawal_fee`
+
+## Exchange Rate Impact
+
+```typescript
+// Before update
+const oldRate = poolData.totalLamports / poolData.poolTokenSupply;
+
+// After update (with rewards and fees)
+const newRate = newTotalLamports / newPoolTokenSupply;
+
+// Rate increases because:
+// - totalLamports increased by rewards
+// - poolTokenSupply increased only by fee tokens (less than rewards)
+
+console.log('Rate increase:', (newRate - oldRate) / oldRate * 100, '%');
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `StakeListOutOfDate` | Validator list not updated this epoch |
+| `AlreadyInUse` | Pool already updated this epoch |
+| `InvalidFeeAccount` | Manager fee account invalid |
+
+## Order of Operations
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Epoch Maintenance Order                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. UpdateValidatorListBalance (all batches)                    │
+│     └── Updates each validator's recorded stake                 │
+│                           │                                     │
+│                           ▼                                     │
+│  2. UpdateStakePoolBalance                                      │
+│     ├── Sums all stakes                                        │
+│     ├── Calculates rewards                                     │
+│     ├── Mints fee tokens                                       │
+│     └── Applies pending fees                                   │
+│                           │                                     │
+│                           ▼                                     │
+│  3. CleanupRemovedValidatorEntries (if needed)                  │
+│     └── Removes validators with ReadyForRemoval status         │
+│                                                                 │
+└──────────────────────────────────────────���──────────────────────┘
+```
+
+## Monitoring
+
+### Check Update Status
+
+```typescript
+async function checkUpdateStatus(
+    connection: Connection,
+    stakePool: PublicKey
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    const currentEpoch = (await connection.getEpochInfo()).epoch;
+    
+    return {
+        lastUpdateEpoch: poolData.lastUpdateEpoch,
+        currentEpoch,
+        needsUpdate: poolData.lastUpdateEpoch < currentEpoch,
+    };
+}
+```
+
+### Calculate APY
+
+```typescript
+function calculateApy(
+    previousTotal: bigint,
+    currentTotal: bigint,
+    epochsPerYear: number = 182 // ~365 days / ~2 days per epoch
+): number {
+    const epochReturn = Number(currentTotal - previousTotal) / Number(previousTotal);
+    const apy = Math.pow(1 + epochReturn, epochsPerYear) - 1;
+    return apy * 100; // Return as percentage
+}
+```
+
+## Best Practices
+
+1. **Call After Validator Updates**: Always call after updating all validators
+2. **Once Per Epoch**: Only needs to be called once per epoch
+3. **Monitor Fee Distribution**: Track fee tokens minted to manager
+4. **Track Exchange Rate**: Monitor rate changes for APY calculation

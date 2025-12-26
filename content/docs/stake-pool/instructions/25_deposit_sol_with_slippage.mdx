@@ -1,0 +1,72 @@
+---
+title: DepositSolWithSlippage
+description: Deposit SOL with minimum token output protection.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 25 |
+| Required Authority | User |
+
+The `DepositSolWithSlippage` instruction is identical to `DepositSol` but includes slippage protection. The transaction will fail if the user would receive fewer tokens than specified.
+
+## Accounts
+
+Same as [DepositSol](./13_deposit_sol).
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount of SOL to deposit |
+| `minimum_pool_tokens_out` | u64 | Minimum tokens to receive |
+
+## Behavior
+
+Same as `DepositSol`, plus:
+- After calculating tokens to mint, validates against minimum
+- Fails if `tokens_to_user < minimum_pool_tokens_out`
+
+## Examples
+
+### TypeScript
+
+```typescript
+async function depositSolSafe(
+    connection: Connection,
+    stakePool: PublicKey,
+    user: Keypair,
+    userTokenAccount: PublicKey,
+    lamports: bigint,
+    slippageBps: number = 50, // 0.5%
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    
+    // Calculate expected tokens
+    const expectedTokens = getDepositQuote(poolData, lamports);
+    
+    // Apply slippage tolerance
+    const minimumTokens = expectedTokens * BigInt(10000 - slippageBps) / 10000n;
+    
+    const instruction = depositSolWithSlippage(
+        stakePool,
+        user.publicKey,
+        userTokenAccount,
+        lamports,
+        minimumTokens,
+    );
+    
+    await sendTransaction(instruction, [user]);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `ExceededSlippage` | Would receive less than minimum tokens |
+| (Other errors same as DepositSol) | |
+
+See [DepositSol](./13_deposit_sol) for full documentation.

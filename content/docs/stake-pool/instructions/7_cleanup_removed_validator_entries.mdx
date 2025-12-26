@@ -1,0 +1,191 @@
+---
+title: CleanupRemovedValidatorEntries
+description: Remove validator entries that have been fully unstaked from the pool.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 7 |
+| Required Authority | None (permissionless) |
+
+The `CleanupRemovedValidatorEntries` instruction removes validators with `ReadyForRemoval` status from the validator list. This is the final step in the validator removal process.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Validator List | ✅ | ❌ | Pool's validator list account |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Iterates through validator list
+2. For each validator with status `ReadyForRemoval`:
+   - Verifies stake accounts are empty
+   - Removes entry from validator list
+3. Compacts validator list (shifts remaining validators)
+
+## Removal Process
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  Complete Removal Lifecycle                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Epoch N: RemoveValidatorFromPool                               │
+│  ├── Status: Active → DeactivatingValidator                    │
+│  └── Stake begins deactivating                                 │
+│                                                                 │
+│  Epoch N+1: UpdateValidatorListBalance                          │
+│  ├── Deactivated stake merged to reserve                       │
+│  └── Status: DeactivatingValidator → ReadyForRemoval           │
+│                                                                 │
+│  Epoch N+1: CleanupRemovedValidatorEntries                      │
+│  └── Entry removed from validator list                         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::cleanup_removed_validator_entries;
+
+fn cleanup_validators(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let cleanup_ix = cleanup_removed_validator_entries(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &stake_pool_data.validator_list,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[cleanup_ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Cleaned up removed validators");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Cleanup removed validators (usually called by 'update' command)
+spl-stake-pool update <POOL_ADDRESS>
+```
+
+## Validator List Compaction
+
+```
+Before Cleanup:
+┌─────────────────────────────────────────────────────────────────┐
+│ Index │ Validator     │ Status          │ Active Stake         │
+├───────┼───────────────┼─────────────────┼──────────────────────┤
+│   0   │ Validator A   │ Active          │ 1000 SOL             │
+│   1   │ Validator B   │ ReadyForRemoval │ 0 SOL                │
+│   2   │ Validator C   │ Active          │ 500 SOL              │
+│   3   │ Validator D   │ ReadyForRemoval │ 0 SOL                │
+│   4   │ Validator E   │ Active          │ 750 SOL              │
+└─────────────────────────────────────────────────────────────────┘
+
+After Cleanup:
+┌─────────────────────────────────────────────────────────────────┐
+│ Index │ Validator     │ Status          │ Active Stake         │
+├───────┼───────────────┼─────────────────┼──────────────────────┤
+│   0   │ Validator A   │ Active          │ 1000 SOL             │
+│   1   │ Validator C   │ Active          │ 500 SOL              │
+│   2   │ Validator E   │ Active          │ 750 SOL              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Checking for Removable Validators
+
+```typescript
+async function getRemovableValidators(
+    connection: Connection,
+    validatorListAddress: PublicKey
+): Promise<ValidatorStakeInfo[]> {
+    const validatorList = await getValidatorList(connection, validatorListAddress);
+    
+    return validatorList.validators.filter(
+        v => v.status === StakeStatus.ReadyForRemoval
+    );
+}
+
+// Usage
+const removable = await getRemovableValidators(connection, validatorList);
+
+if (removable.length > 0) {
+    console.log(`${removable.length} validators ready for cleanup`);
+    await cleanupRemovedValidatorEntries(stakePool);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InvalidState` | Validator list corrupted |
+| `WrongStakeState` | Validator still has stake |
+
+## When to Call
+
+Call `CleanupRemovedValidatorEntries`:
+
+1. **After Each Epoch Update**: Part of regular maintenance
+2. **After Validator Removal**: Clean up after removal is complete
+3. **Periodically**: Ensure list stays clean
+
+```typescript
+async function runMaintenance(
+    connection: Connection,
+    stakePool: PublicKey
+) {
+    // 1. Update validator balances
+    await updateValidatorListBalance(stakePool);
+    
+    // 2. Update pool balance
+    await updateStakePoolBalance(stakePool);
+    
+    // 3. Cleanup removed validators
+    const removable = await getRemovableValidators(connection, validatorList);
+    if (removable.length > 0) {
+        await cleanupRemovedValidatorEntries(stakePool);
+    }
+}
+```
+
+## Best Practices
+
+1. **Regular Cleanup**: Include in epoch maintenance routine
+2. **Check Before Cleanup**: Verify validators are ready for removal
+3. **Monitor List Size**: Track validator count over time
+4. **Batch if Needed**: Many removals may require multiple transactions
+
+## Impact on Pool
+
+| Metric | Effect |
+|--------|--------|
+| **Validator Count** | Decreases |
+| **Validator List Size** | Bytes freed (but account not resized) |
+| **Total Stake** | Unchanged |
+| **Exchange Rate** | Unchanged |
+| **Max Validators** | Unchanged (capacity freed for new additions) |

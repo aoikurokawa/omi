@@ -1,0 +1,78 @@
+---
+title: DepositStakeWithSlippage
+description: Deposit a stake account with minimum token output protection.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 23 |
+| Required Authority | User (stake owner) |
+
+The `DepositStakeWithSlippage` instruction is identical to `DepositStake` but includes slippage protection. The transaction will fail if the user would receive fewer tokens than the specified minimum.
+
+## Accounts
+
+Same as [DepositStake](./8_deposit_stake).
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `minimum_pool_tokens_out` | u64 | Minimum tokens to receive |
+
+## Behavior
+
+Same as `DepositStake`, plus:
+- After calculating tokens to mint, validates against minimum
+- Fails if `tokens_to_user < minimum_pool_tokens_out`
+
+## Examples
+
+### TypeScript
+
+```typescript
+async function depositStakeSafe(
+    connection: Connection,
+    stakePool: PublicKey,
+    userStake: PublicKey,
+    userTokenAccount: PublicKey,
+    slippageBps: number = 50, // 0.5%
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    const stakeBalance = await connection.getBalance(userStake);
+    
+    // Calculate expected tokens
+    const expectedTokens = getDepositQuote(poolData, stakeBalance);
+    
+    // Apply slippage tolerance
+    const minimumTokens = expectedTokens * BigInt(10000 - slippageBps) / 10000n;
+    
+    const instruction = depositStakeWithSlippage(
+        stakePool,
+        userStake,
+        userTokenAccount,
+        minimumTokens,
+    );
+    
+    // Transaction fails if exchange rate moves unfavorably
+    await sendTransaction(instruction);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `ExceededSlippage` | Would receive less than minimum tokens |
+| (Other errors same as DepositStake) | |
+
+## When to Use
+
+Use slippage protection when:
+- Exchange rate may change between quote and execution
+- Depositing large amounts that could move the rate
+- Building user-facing applications
+
+See [DepositStake](./8_deposit_stake) for full documentation.

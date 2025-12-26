@@ -1,0 +1,238 @@
+---
+title: WithdrawSol
+description: Burn pool tokens to withdraw SOL directly from the reserve.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 15 |
+| Required Authority | User (token holder) |
+
+The `WithdrawSol` instruction allows users to burn their pool tokens (LST) and receive SOL directly from the pool's reserve. This provides instant liquidity without waiting for stake deactivation.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 2 | User Transfer Authority | ❌ | ✅ | Authority to burn pool tokens |
+| 3 | User Token Account | ✅ | ❌ | User's pool token account |
+| 4 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 5 | User SOL Destination | ✅ | ❌ | User's wallet (receives SOL) |
+| 6 | Manager Fee Account | ✅ | ❌ | Manager's fee token account |
+| 7 | Pool Mint | ✅ | ❌ | Pool token mint |
+| 8 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 9 | Stake History Sysvar | ❌ | ❌ | Stake history sysvar |
+| 10 | Stake Program | ❌ | ❌ | Native stake program |
+| 11 | Token Program | ❌ | ❌ | SPL Token program |
+| 12 | (Optional) SOL Withdraw Authority | ❌ | ✅ | If withdrawals are restricted |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pool_tokens` | u64 | Amount of pool tokens to burn |
+
+## Behavior
+
+1. Validates user has sufficient pool tokens
+2. If SOL withdraw authority is set, requires its signature
+3. Checks reserve has sufficient balance
+4. Calculates SOL to withdraw:
+   - Based on exchange rate
+   - Minus withdrawal fee
+5. Transfers fee tokens to manager
+6. Burns tokens from user
+7. Withdraws SOL from reserve to user
+8. Updates pool's `total_lamports`
+
+## SOL Calculation
+
+```
+tokens_to_burn = pool_tokens
+withdrawal_fee = tokens_to_burn × (sol_withdrawal_fee_numerator / sol_withdrawal_fee_denominator)
+
+tokens_for_sol = tokens_to_burn - withdrawal_fee
+sol_to_receive = tokens_for_sol × (total_pool_lamports / pool_token_supply)
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::withdraw_sol;
+
+fn withdraw_sol_from_pool(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    user: &Keypair,
+    user_token_account: &Pubkey,
+    pool_tokens: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let withdraw_ix = withdraw_sol(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &withdraw_authority,
+        &user.pubkey(),
+        user_token_account,
+        &stake_pool_data.reserve_stake,
+        &user.pubkey(), // SOL destination
+        &stake_pool_data.manager_fee_account,
+        &stake_pool_data.pool_mint,
+        &stake_pool_data.token_program_id,
+        pool_tokens,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[withdraw_ix],
+        Some(&user.pubkey()),
+        &[user],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Withdrew {} pool tokens as SOL", pool_tokens);
+    Ok(())
+}
+```
+
+### TypeScript
+
+```typescript
+import { withdrawSol } from '@solana/spl-stake-pool';
+
+async function withdraw(
+    connection: Connection,
+    stakePool: PublicKey,
+    user: Keypair,
+    userTokenAccount: PublicKey,
+    poolTokens: bigint,
+) {
+    const poolData = await getStakePoolAccount(connection, stakePool);
+    
+    const instruction = withdrawSol(
+        STAKE_POOL_PROGRAM_ID,
+        stakePool,
+        user.publicKey,
+        userTokenAccount,
+        poolData.account.data.reserveStake,
+        user.publicKey, // SOL destination
+        poolTokens,
+    );
+    
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [user],
+    );
+    
+    console.log('Withdrawal complete:', signature);
+}
+```
+
+### CLI
+
+```bash
+# Withdraw SOL (specify pool token amount)
+spl-stake-pool withdraw-sol <POOL_ADDRESS> <POOL_TOKEN_AMOUNT>
+```
+
+## Reserve Availability
+
+SOL withdrawals depend on reserve balance:
+
+```typescript
+async function getMaxSolWithdrawal(
+    connection: Connection,
+    stakePool: StakePool
+): Promise<bigint> {
+    const reserveInfo = await connection.getAccountInfo(stakePool.reserveStake);
+    if (!reserveInfo) return 0n;
+    
+    // Reserve balance minus rent
+    const rentExempt = await connection.getMinimumBalanceForRentExemption(200);
+    const available = BigInt(reserveInfo.lamports) - BigInt(rentExempt);
+    
+    // Convert to pool tokens
+    const maxTokens = (available * stakePool.poolTokenSupply) / stakePool.totalLamports;
+    
+    return maxTokens;
+}
+
+// Usage
+const maxWithdraw = await getMaxSolWithdrawal(connection, poolData);
+if (userTokens > maxWithdraw) {
+    console.log('Insufficient reserve. Use WithdrawStake instead.');
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `ReserveDepleted` | Reserve has insufficient SOL |
+| `InsufficientFunds` | User has insufficient pool tokens |
+| `StakeListOutOfDate` | Pool needs update |
+| `SignatureMissing` | Withdraw authority didn't sign (if restricted) |
+
+## WithdrawSol vs WithdrawStake
+
+| Feature | WithdrawSol | WithdrawStake |
+|---------|-------------|---------------|
+| **Output** | Liquid SOL | Delegated stake account |
+| **Availability** | Limited by reserve | Always available |
+| **Speed** | Instant | May need deactivation |
+| **Fee Type** | SOL withdrawal fee | Stake withdrawal fee |
+
+## Quote Before Withdrawal
+
+```typescript
+async function getWithdrawalQuote(
+    connection: Connection,
+    stakePool: PublicKey,
+    poolTokens: bigint,
+): Promise<{
+    solAmount: bigint;
+    fee: bigint;
+    netSol: bigint;
+    available: boolean;
+}> {
+    const poolData = await getStakePool(connection, stakePool);
+    const reserveBalance = await getReserveBalance(connection, poolData.reserveStake);
+    
+    // Calculate fee
+    const fee = (poolTokens * BigInt(poolData.solWithdrawalFee.numerator))
+        / BigInt(poolData.solWithdrawalFee.denominator);
+    
+    const tokensForSol = poolTokens - fee;
+    const solAmount = (tokensForSol * poolData.totalLamports) / poolData.poolTokenSupply;
+    
+    return {
+        solAmount,
+        fee,
+        netSol: solAmount,
+        available: solAmount <= reserveBalance,
+    };
+}
+```
+
+## Best Practices
+
+1. **Check Reserve**: Verify reserve has sufficient balance
+2. **Calculate Fee**: Account for withdrawal fee in expected amount
+3. **Fallback to Stake**: If reserve depleted, use WithdrawStake
+4. **Monitor Reserve**: Large withdrawals may deplete reserve quickly

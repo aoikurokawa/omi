@@ -1,0 +1,285 @@
+---
+title: WithdrawStake
+description: Burn pool tokens to receive a stake account from the pool.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 9 |
+| Required Authority | User (token holder) |
+
+The `WithdrawStake` instruction allows users to burn their pool tokens (LST) and receive a stake account split from the pool's validator stake. The received stake may be active (delegated) or need deactivation.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator Stake Account | ✅ | ❌ | Pool's stake account to split from |
+| 4 | User Stake Account | ✅ | ❌ | New stake account for user |
+| 5 | User Stake Authority | ❌ | ❌ | Authority for new stake account |
+| 6 | User Transfer Authority | ❌ | ✅ | Authority to burn pool tokens |
+| 7 | User Token Account | ✅ | ❌ | User's pool token account |
+| 8 | Manager Fee Account | ✅ | ❌ | Manager's fee token account |
+| 9 | Pool Mint | ✅ | ❌ | Pool token mint |
+| 10 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 11 | Token Program | ❌ | ❌ | SPL Token program |
+| 12 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pool_tokens` | u64 | Amount of pool tokens to burn |
+
+## Behavior
+
+1. Validates user has sufficient pool tokens
+2. Calculates stake amount from pool tokens:
+   - Based on current exchange rate
+   - Minus withdrawal fee
+3. Transfers withdrawal fee tokens to manager
+4. Burns remaining tokens from user
+5. Splits stake from validator stake account
+6. Sets new stake account authorities to user's specified authority
+7. Updates validator's stake balance in validator list
+
+## Stake Calculation
+
+```
+tokens_to_burn = pool_tokens
+withdrawal_fee = tokens_to_burn × (withdrawal_fee_numerator / withdrawal_fee_denominator)
+
+tokens_for_stake = tokens_to_burn - withdrawal_fee
+lamports_to_receive = tokens_for_stake × (total_pool_lamports / pool_token_supply)
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::withdraw_stake;
+
+fn withdraw_stake_from_pool(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    user: &Keypair,
+    user_token_account: &Pubkey,
+    vote_account: &Pubkey, // Validator to withdraw from
+    pool_tokens: u64,
+) -> Result<Pubkey, Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    // Create new stake account for user
+    let user_stake = Keypair::new();
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (validator_stake, _) = Pubkey::find_program_address(
+        &[
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            b"validator",
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    // Create the user's stake account
+    let rent = client.get_minimum_balance_for_rent_exemption(200)?;
+    let create_stake_ix = system_instruction::create_account(
+        &user.pubkey(),
+        &user_stake.pubkey(),
+        rent,
+        200,
+        &stake::program::id(),
+    );
+    
+    let withdraw_ix = withdraw_stake(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &stake_pool_data.validator_list,
+        &withdraw_authority,
+        &validator_stake,
+        &user_stake.pubkey(),
+        &user.pubkey(), // new stake authority
+        &user.pubkey(), // token authority
+        user_token_account,
+        &stake_pool_data.manager_fee_account,
+        &stake_pool_data.pool_mint,
+        &stake_pool_data.token_program_id,
+        pool_tokens,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[create_stake_ix, withdraw_ix],
+        Some(&user.pubkey()),
+        &[user, &user_stake],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Withdrew stake to {}", user_stake.pubkey());
+    Ok(user_stake.pubkey())
+}
+```
+
+### TypeScript
+
+```typescript
+import { withdrawStake } from '@solana/spl-stake-pool';
+
+async function withdraw(
+    connection: Connection,
+    stakePool: PublicKey,
+    user: Keypair,
+    userTokenAccount: PublicKey,
+    poolTokens: bigint,
+) {
+    const poolData = await getStakePoolAccount(connection, stakePool);
+    
+    // Create new stake account
+    const userStake = Keypair.generate();
+    const rent = await connection.getMinimumBalanceForRentExemption(200);
+    
+    const createStakeIx = SystemProgram.createAccount({
+        fromPubkey: user.publicKey,
+        newAccountPubkey: userStake.publicKey,
+        lamports: rent,
+        space: 200,
+        programId: StakeProgram.programId,
+    });
+    
+    // Choose a validator to withdraw from
+    const validatorList = await getValidatorList(
+        connection,
+        poolData.account.data.validatorList
+    );
+    const validator = validatorList.validators[0]; // or preferred
+    
+    const withdrawIx = withdrawStake(
+        STAKE_POOL_PROGRAM_ID,
+        stakePool,
+        poolData.account.data.validatorList,
+        validator.voteAccountAddress,
+        userStake.publicKey,
+        user.publicKey,
+        userTokenAccount,
+        poolTokens,
+    );
+    
+    const transaction = new Transaction()
+        .add(createStakeIx)
+        .add(withdrawIx);
+    
+    const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [user, userStake],
+    );
+    
+    console.log('Withdrawal complete:', signature);
+    console.log('New stake account:', userStake.publicKey.toBase58());
+}
+```
+
+### CLI
+
+```bash
+# Withdraw stake (tokens amount)
+spl-stake-pool withdraw-stake <POOL_ADDRESS> <AMOUNT>
+
+# Withdraw from specific validator
+spl-stake-pool withdraw-stake <POOL_ADDRESS> <AMOUNT> \
+    --vote-account <VOTE_ACCOUNT>
+
+# Specify stake account to create
+spl-stake-pool withdraw-stake <POOL_ADDRESS> <AMOUNT> \
+    --stake-receiver <STAKE_KEYPAIR>
+```
+
+## Preferred Validator
+
+If the pool has a preferred withdraw validator set:
+
+```typescript
+// Check for preferred validator
+if (poolData.preferredWithdrawValidatorVoteAddress) {
+    // Must withdraw from preferred validator first
+    const preferredValidator = validatorList.validators.find(
+        v => v.voteAccountAddress.equals(
+            poolData.preferredWithdrawValidatorVoteAddress
+        )
+    );
+}
+```
+
+## Received Stake Account
+
+The stake account received will be:
+
+| Property | Value |
+|----------|-------|
+| **Stake Authority** | User-specified |
+| **Withdraw Authority** | User-specified |
+| **Delegation** | Same validator |
+| **State** | Active (if validator stake was active) |
+| **Lockup** | Pool's lockup (if any) |
+
+## Post-Withdrawal
+
+After receiving the stake account:
+
+```typescript
+// Option 1: Keep staking (already delegated)
+console.log('Stake is active with validator');
+
+// Option 2: Deactivate to withdraw SOL
+const deactivateIx = StakeProgram.deactivate({
+    stakePubkey: userStake,
+    authorizedPubkey: user.publicKey,
+});
+await sendTransaction(connection, new Transaction().add(deactivateIx), [user]);
+
+// Wait for cooldown (1+ epochs)
+
+// Option 3: Redelegate to different validator
+const redelegateIx = StakeProgram.delegate({
+    stakePubkey: userStake,
+    authorizedPubkey: user.publicKey,
+    votePubkey: newVoteAccount,
+});
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InsufficientFunds` | Not enough pool tokens |
+| `ValidatorNotFound` | Validator not in pool |
+| `StakeListOutOfDate` | Pool needs update |
+| `SignatureMissing` | Token authority didn't sign |
+
+## Withdraw vs WithdrawSol
+
+| Feature | WithdrawStake | WithdrawSol |
+|---------|---------------|-------------|
+| **Output** | Stake account (delegated) | SOL (liquid) |
+| **Availability** | Always available | Requires reserve balance |
+| **Deactivation** | User must deactivate | Already liquid |
+| **Fee Type** | Stake withdrawal fee | SOL withdrawal fee |
+
+## Best Practices
+
+1. **Check Exchange Rate**: Verify expected SOL before withdrawal
+2. **Choose Validator**: Consider preferred validator or stake distribution
+3. **Account for Fee**: Calculate fee before burning tokens
+4. **Plan for Cooldown**: If you need liquid SOL, account for deactivation time

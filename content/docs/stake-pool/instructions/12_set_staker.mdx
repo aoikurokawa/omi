@@ -1,0 +1,96 @@
+---
+title: SetStaker
+description: Change the pool's staker authority.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 12 |
+| Required Authority | Manager |
+
+The `SetStaker` instruction allows the manager to change the pool's staker authority. Unlike `SetManager`, only the current manager needs to sign.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+| 2 | New Staker | ❌ | ❌ | New staker authority |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Validates manager signature
+2. Updates `staker` to new staker's pubkey
+
+## Staker Capabilities
+
+The staker authority can:
+
+| Action | Description |
+|--------|-------------|
+| AddValidatorToPool | Add new validators |
+| RemoveValidatorFromPool | Remove validators |
+| IncreaseValidatorStake | Move SOL from reserve to validator |
+| DecreaseValidatorStake | Move stake from validator to reserve |
+| Redelegate | Transfer stake between validators |
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::set_staker;
+
+fn change_staker(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    new_staker: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let set_staker_ix = set_staker(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        new_staker,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[set_staker_ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Staker changed to {}", new_staker);
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Change staker authority
+spl-stake-pool set-staker <POOL_ADDRESS> <NEW_STAKER_PUBKEY>
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+
+## Use Cases
+
+- **Delegate Management**: Allow another team to handle rebalancing
+- **Automation**: Set to a program for automated staking
+- **Key Rotation**: Update staker key for security

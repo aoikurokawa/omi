@@ -1,0 +1,221 @@
+---
+title: RemoveValidatorFromPool
+description: Remove a validator from the stake pool.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 2 |
+| Required Authority | Staker |
+
+The `RemoveValidatorFromPool` instruction initiates removal of a validator from the pool. This is a multi-epoch process: the validator's stake is deactivated and eventually merged back to the reserve.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 4 | Validator Stake Account | ✅ | ❌ | Validator's stake account PDA |
+| 5 | Transient Stake Account | ✅ | ❌ | Validator's transient stake PDA |
+| 6 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 7 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Validates staker authority signature
+2. Checks validator exists in the pool
+3. Checks validator has no transient stake (if it does, fails)
+4. If validator has active stake:
+   - Deactivates the stake account
+   - Sets validator status to `DeactivatingValidator`
+5. If validator has no stake:
+   - Sets status directly to `ReadyForRemoval`
+
+## Removal Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   Validator Removal Timeline                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Epoch N: RemoveValidatorFromPool called                        │
+│  ├── Stake deactivated                                         │
+│  └── Status = DeactivatingValidator                            │
+│                                                                 │
+│  Epoch N+1: UpdateValidatorListBalance                          │
+│  ├── Deactivated stake merged to reserve                       │
+│  └── Status = ReadyForRemoval                                  │
+│                                                                 │
+│  Epoch N+2: CleanupRemovedValidatorEntries                      │
+│  └── Validator entry removed from list                         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::remove_validator_from_pool;
+
+fn remove_validator(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    staker: &Keypair,
+    vote_account: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (validator_stake, _) = Pubkey::find_program_address(
+        &[
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            b"validator",
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    // Get validator info to find transient seed
+    let validator_info = find_validator_info(&stake_pool_data, vote_account)?;
+    
+    let (transient_stake, _) = Pubkey::find_program_address(
+        &[
+            b"transient",
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            &validator_info.transient_seed_suffix.to_le_bytes(),
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    let remove_ix = remove_validator_from_pool(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &staker.pubkey(),
+        &withdraw_authority,
+        &stake_pool_data.validator_list,
+        &validator_stake,
+        &transient_stake,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[remove_ix],
+        Some(&staker.pubkey()),
+        &[staker],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Initiated removal of validator {}", vote_account);
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Remove a validator from the pool
+spl-stake-pool remove-validator <POOL_ADDRESS> <VOTE_ACCOUNT>
+
+# With custom staker keypair
+spl-stake-pool remove-validator <POOL_ADDRESS> <VOTE_ACCOUNT> \
+    --staker staker.json
+```
+
+## Prerequisites
+
+Before removing a validator:
+
+1. **No Transient Stake**: Ensure no stake is warming up or cooling down
+2. **Decrease Stake First**: If validator has significant stake, decrease it first
+
+```typescript
+// First, decrease all stake from the validator
+if (validatorInfo.activeStake > minStake) {
+    await decreaseValidatorStake(
+        stakePool,
+        voteAccount,
+        validatorInfo.activeStake - minStake
+    );
+    
+    // Wait for next epoch and update
+    await waitForNextEpoch();
+    await updateValidatorListBalance(stakePool);
+}
+
+// Then remove the validator
+await removeValidatorFromPool(stakePool, voteAccount);
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker did not sign |
+| `ValidatorNotFound` | Validator not in pool |
+| `UserStakeNotActive` | Stake in wrong state |
+| `WrongStakeState` | Transient stake exists |
+
+## Completion
+
+After initiating removal:
+
+### 1. Wait for Deactivation
+
+```typescript
+// Check validator status
+const validatorList = await getValidatorList(connection, validatorListAddress);
+const validator = validatorList.validators.find(
+    v => v.voteAccountAddress.equals(voteAccount)
+);
+
+console.log('Status:', validator.status);
+// DeactivatingValidator -> ReadyForRemoval
+```
+
+### 2. Run Epoch Maintenance
+
+```typescript
+// In the next epoch, update balances
+await updateValidatorListBalance(stakePool);
+await updateStakePoolBalance(stakePool);
+```
+
+### 3. Cleanup
+
+```typescript
+// Once status is ReadyForRemoval
+await cleanupRemovedValidatorEntries(stakePool);
+```
+
+## Best Practices
+
+1. **Reduce Stake First**: Decrease stake before removal for faster completion
+2. **Check Transient**: Ensure no pending stake operations
+3. **Notify Users**: Large removals may affect pool distribution
+4. **Complete Cleanup**: Don't leave validators in ReadyForRemoval state
+
+## Impact on Pool
+
+| Metric | Effect |
+|--------|--------|
+| **Validator Count** | Decreases after cleanup |
+| **Total Stake** | Unchanged (moves to reserve) |
+| **Stake Distribution** | Other validators' relative share increases |
+| **User Tokens** | Unaffected |
