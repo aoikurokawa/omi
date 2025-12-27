@@ -45,62 +45,6 @@ pub enum StakeAuthorize {
 
 ## Examples
 
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  StakeAuthorizationType,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-const stakeAccountPubkey = new PublicKey('...');
-const currentAuthority = /* Keypair */;
-const newAuthorityPubkey = new PublicKey('...');
-
-// Change stake authority
-const authorizeStakerIx = StakeProgram.authorize({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: currentAuthority.publicKey,
-  newAuthorizedPubkey: newAuthorityPubkey,
-  stakeAuthorizationType: StakeAuthorizationType.Staker,
-});
-
-// Change withdraw authority
-const authorizeWithdrawerIx = StakeProgram.authorize({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: currentAuthority.publicKey, // Must be current withdrawer
-  newAuthorizedPubkey: newAuthorityPubkey,
-  stakeAuthorizationType: StakeAuthorizationType.Withdrawer,
-});
-
-const tx = new Transaction().add(authorizeStakerIx);
-await sendAndConfirmTransaction(connection, tx, [payer, currentAuthority]);
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { 
-  getAuthorizeInstruction, 
-  StakeAuthorize 
-} from '@solana-program/stake';
-import { CLOCK_SYSVAR_ADDRESS } from '@solana/kit';
-
-const authorizeIx = getAuthorizeInstruction({
-  stakeAccount: stakeAccountAddress,
-  authority: currentAuthoritySigner,
-  newAuthority: newAuthorityAddress,
-  stakeAuthorize: StakeAuthorize.Staker,
-  clock: CLOCK_SYSVAR_ADDRESS,
-});
-```
-
 ### Rust
 
 ```rust
@@ -159,8 +103,3 @@ solana stake-authorize <STAKE_ACCOUNT_ADDRESS> \
   --new-stake-authority <NEW_STAKE_AUTHORITY_PUBKEY> \
   --new-withdraw-authority <NEW_WITHDRAW_AUTHORITY_PUBKEY>
 ```
-
----
-
-
----

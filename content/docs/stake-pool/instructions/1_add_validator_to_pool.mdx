@@ -1,0 +1,211 @@
+---
+title: AddValidatorToPool
+description: Add a new validator to the stake pool's validator list.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 1 |
+| Required Authority | Staker |
+
+The `AddValidatorToPool` instruction adds a new validator to the pool's validator list and creates the associated validator stake account PDA.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Funder | ✅ | ✅ | Pays for stake account rent |
+| 3 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 4 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 5 | Validator Stake Account | ✅ | ❌ | PDA for new validator stake |
+| 6 | Vote Account | ❌ | ❌ | Validator's vote account |
+| 7 | Rent Sysvar | ❌ | ❌ | Rent sysvar |
+| 8 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 9 | Stake History Sysvar | ❌ | ❌ | Stake history sysvar |
+| 10 | Stake Config | ❌ | ❌ | Stake config account |
+| 11 | System Program | ❌ | ❌ | System program |
+| 12 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `seed` | `Option<u32>` | Optional seed for stake account PDA |
+
+## Behavior
+
+1. Validates staker authority signature
+2. Checks validator list has capacity for new validator
+3. Checks validator is not already in the list
+4. Derives validator stake account PDA
+5. Creates validator stake account (funded by funder)
+6. Initializes stake account with pool's withdraw authority
+7. Adds validator entry to validator list with:
+   - `active_stake_lamports`: 0
+   - `transient_stake_lamports`: 0
+   - `status`: Active
+   - `last_update_epoch`: current epoch
+
+## Stake Account PDA
+
+The validator stake account address is derived as:
+
+```rust
+// Without optional seed
+seeds = [vote_account, stake_pool, b"validator"]
+
+// With optional seed
+seeds = [vote_account, stake_pool, b"validator", &seed.to_le_bytes()]
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::add_validator_to_pool;
+
+fn add_validator(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    staker: &Keypair,
+    vote_account: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Derive PDAs
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (validator_stake, _) = Pubkey::find_program_address(
+        &[
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            b"validator",
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    let stake_pool_account = client.get_account(stake_pool)?;
+    let stake_pool_data = StakePool::deserialize(&stake_pool_account.data)?;
+    
+    let add_ix = add_validator_to_pool(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &staker.pubkey(),
+        &staker.pubkey(), // funder
+        &withdraw_authority,
+        &stake_pool_data.validator_list,
+        &validator_stake,
+        vote_account,
+        None, // No optional seed
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[add_ix],
+        Some(&staker.pubkey()),
+        &[staker],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Added validator {} to pool", vote_account);
+    Ok(())
+}
+```
+
+### TypeScript
+
+```typescript
+import { addValidatorToPool } from '@solana/spl-stake-pool';
+
+async function addValidator(
+    connection: Connection,
+    stakePool: PublicKey,
+    staker: Keypair,
+    voteAccount: PublicKey,
+) {
+    const stakePoolAccount = await getStakePoolAccount(connection, stakePool);
+    
+    const instruction = addValidatorToPool(
+        STAKE_POOL_PROGRAM_ID,
+        stakePool,
+        staker.publicKey,
+        staker.publicKey, // funder
+        stakePoolAccount.account.data.validatorList,
+        voteAccount,
+    );
+    
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [staker],
+    );
+    
+    console.log('Added validator:', signature);
+}
+```
+
+### CLI
+
+```bash
+# Add a validator to the pool
+spl-stake-pool add-validator <POOL_ADDRESS> <VOTE_ACCOUNT>
+
+# With custom staker keypair
+spl-stake-pool add-validator <POOL_ADDRESS> <VOTE_ACCOUNT> \
+    --staker staker.json
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker did not sign |
+| `ValidatorAlreadyAdded` | Validator already in pool |
+| `ValidatorListOverflow` | Validator list at max capacity |
+| `InvalidProgramAddress` | PDA derivation mismatch |
+| `WrongStakeState` | Vote account invalid or inactive |
+
+## Post-Addition
+
+After adding a validator:
+
+1. **No stake yet**: The validator stake account is empty
+2. **Use IncreaseValidatorStake**: Move SOL from reserve to validator
+3. **Wait for warmup**: Stake becomes active after epochs
+
+```typescript
+// After adding, increase stake to the validator
+const increaseIx = increaseValidatorStake(
+    stakePool,
+    validatorVoteAccount,
+    lamportsToDelegate,
+);
+```
+
+## Best Practices
+
+1. **Verify Vote Account**: Ensure vote account is active and valid
+2. **Check Capacity**: Verify validator list has room before adding
+3. **Stake After Adding**: New validators start with 0 stake
+4. **Monitor Performance**: Track validator performance after addition
+
+## Validator Selection Criteria
+
+Consider these factors when adding validators:
+
+| Factor | Why It Matters |
+|--------|----------------|
+| **Commission** | Lower commission = higher rewards for stakers |
+| **Uptime** | Higher uptime = more consistent rewards |
+| **Stake Concentration** | Avoid over-concentration for decentralization |
+| **MEV Performance** | For Jito pools, MEV rewards matter |
+| **Data Center Diversity** | Geographic distribution reduces risk |

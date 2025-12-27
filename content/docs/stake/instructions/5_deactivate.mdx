@@ -10,7 +10,8 @@ description: Begin the deactivation cooldown process for delegated stake.
 | Instruction Index | 5 |
 | Estimated CU | ~10,600 |
 
-The `Deactivate` instruction initiates the cooldown process for stake. Once deactivation completes (after one or more epochs), the stake can be withdrawn.
+The `Deactivate` instruction initiates the cooldown process for stake.
+Once deactivation completes (after one or more epochs), the stake can be withdrawn.
 
 ## Accounts
 
@@ -38,50 +39,6 @@ The cooldown period depends on network conditions:
 - **High deactivation volume**: May extend longer
 
 ## Examples
-
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-const stakeAccountPubkey = new PublicKey('...');
-const stakeAuthority = /* Keypair */;
-
-const deactivateIx = StakeProgram.deactivate({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: stakeAuthority.publicKey,
-});
-
-const tx = new Transaction().add(deactivateIx);
-
-const signature = await sendAndConfirmTransaction(connection, tx, [
-  payer,
-  stakeAuthority,
-]);
-
-console.log('Deactivation initiated:', signature);
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { getDeactivateInstruction } from '@solana-program/stake';
-import { CLOCK_SYSVAR_ADDRESS } from '@solana/kit';
-
-const deactivateIx = getDeactivateInstruction({
-  stakeAccount: stakeAccountAddress,
-  stakeAuthority: stakeAuthoritySigner,
-  clock: CLOCK_SYSVAR_ADDRESS,
-});
-```
 
 ### Rust
 
@@ -154,5 +111,3 @@ async function monitorDeactivation(
 |-------|-------|
 | `InvalidAccountData` | Stake account not delegated |
 | `AlreadyDeactivated` | Stake already deactivating or deactivated |
-
----

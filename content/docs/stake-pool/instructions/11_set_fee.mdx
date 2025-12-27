@@ -1,0 +1,194 @@
+---
+title: SetFee
+description: Update the pool's fee parameters.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 11 |
+| Required Authority | Manager |
+
+The `SetFee` instruction updates the pool's fee parameters. Withdrawal fee changes have protections and take effect after a delay.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fee` | FeeType | The fee type and new value |
+
+```rust
+pub enum FeeType {
+    /// Epoch fee (taken from rewards)
+    SolReferral(u8),
+    StakeReferral(u8),
+    Epoch(Fee),
+    StakeWithdrawal(Fee),
+    SolWithdrawal(Fee),
+    StakeDeposit(Fee),
+    SolDeposit(Fee),
+}
+
+pub struct Fee {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+```
+
+## Behavior
+
+### Immediate Changes
+- Deposit fees (SOL and stake)
+- Referral fees
+- Epoch fee
+
+### Delayed Changes (2 epochs)
+- Withdrawal fees (SOL and stake)
+
+1. Validates manager signature
+2. Validates fee is valid (numerator ≤ denominator)
+3. For withdrawal fees:
+   - Validates fee increase is within allowed limit
+   - Sets `next_*_withdrawal_fee` to `FutureEpoch::Two(new_fee)`
+4. For other fees:
+   - Updates fee immediately
+
+## Fee Change Protection
+
+Withdrawal fee increases are limited to protect stakers:
+
+```rust
+// Maximum allowed increase factor
+const MAX_WITHDRAWAL_FEE_INCREASE: Fee = Fee {
+    numerator: 1,
+    denominator: 16, // Can only increase by 1/16 (6.25%) per change
+};
+
+// Example: Current fee is 1%
+// Maximum new fee = 1% + (1% × 1/16) = 1.0625%
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::{set_fee, FeeType};
+use spl_stake_pool::state::Fee;
+
+fn set_epoch_fee(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    new_fee: Fee,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let set_fee_ix = set_fee(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        FeeType::Epoch(new_fee),
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[set_fee_ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Epoch fee updated");
+    Ok(())
+}
+
+fn set_withdrawal_fee(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    new_fee: Fee,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Note: This will take 2 epochs to take effect
+    let set_fee_ix = set_fee(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        FeeType::StakeWithdrawal(new_fee),
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[set_fee_ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Withdrawal fee update scheduled (takes effect in 2 epochs)");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Set epoch fee to 5%
+spl-stake-pool set-fee <POOL_ADDRESS> epoch 5
+
+# Set stake deposit fee to 0.1%
+spl-stake-pool set-fee <POOL_ADDRESS> stake-deposit-fee 0.1
+
+# Set stake withdrawal fee (delayed)
+spl-stake-pool set-fee <POOL_ADDRESS> stake-withdrawal-fee 0.5
+
+# Set referral fee to 50% of deposit fee
+spl-stake-pool set-fee <POOL_ADDRESS> stake-referral-fee 50
+```
+
+## Fee Types Reference
+
+| Fee Type | Range | When Applied | Update Effect |
+|----------|-------|--------------|---------------|
+| `Epoch` | 0-100% | Each epoch on rewards | Immediate |
+| `StakeDeposit` | 0-100% | On stake deposits | Immediate |
+| `SolDeposit` | 0-100% | On SOL deposits | Immediate |
+| `StakeWithdrawal` | 0-100% | On stake withdrawals | 2 epoch delay |
+| `SolWithdrawal` | 0-100% | On SOL withdrawals | 2 epoch delay |
+| `StakeReferral` | 0-100 | % of stake deposit fee | Immediate |
+| `SolReferral` | 0-100 | % of SOL deposit fee | Immediate |
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+| `FeeTooHigh` | Fee numerator > denominator |
+| `FeeIncreaseTooHigh` | Withdrawal fee increase exceeds limit |
+
+## Checking Pending Fees
+
+```typescript
+async function getPendingFees(
+    connection: Connection,
+    stakePool: PublicKey
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    
+    return {
+        currentStakeWithdrawalFee: poolData.stakeWithdrawalFee,
+        pendingStakeWithdrawalFee: poolData.nextStakeWithdrawalFee,
+        currentSolWithdrawalFee: poolData.solWithdrawalFee,
+        pendingSolWithdrawalFee: poolData.nextSolWithdrawalFee,
+    };
+}
+```

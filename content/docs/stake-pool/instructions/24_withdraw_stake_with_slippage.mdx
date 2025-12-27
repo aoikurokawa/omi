@@ -1,0 +1,70 @@
+---
+title: WithdrawStakeWithSlippage
+description: Withdraw stake with minimum lamports output protection.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 24 |
+| Required Authority | User (token holder) |
+
+The `WithdrawStakeWithSlippage` instruction is identical to `WithdrawStake` but includes slippage protection. The transaction will fail if the user would receive fewer lamports than specified.
+
+## Accounts
+
+Same as [WithdrawStake](./9_withdraw_stake).
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pool_tokens` | u64 | Amount of pool tokens to burn |
+| `minimum_lamports_out` | u64 | Minimum lamports to receive |
+
+## Behavior
+
+Same as `WithdrawStake`, plus:
+- After calculating lamports to withdraw, validates against minimum
+- Fails if `lamports_to_user < minimum_lamports_out`
+
+## Examples
+
+### TypeScript
+
+```typescript
+async function withdrawStakeSafe(
+    connection: Connection,
+    stakePool: PublicKey,
+    userTokenAccount: PublicKey,
+    poolTokens: bigint,
+    slippageBps: number = 50, // 0.5%
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    
+    // Calculate expected lamports
+    const expectedLamports = getWithdrawalQuote(poolData, poolTokens);
+    
+    // Apply slippage tolerance
+    const minimumLamports = expectedLamports * BigInt(10000 - slippageBps) / 10000n;
+    
+    const instruction = withdrawStakeWithSlippage(
+        stakePool,
+        userTokenAccount,
+        poolTokens,
+        minimumLamports,
+    );
+    
+    await sendTransaction(instruction);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `ExceededSlippage` | Would receive less than minimum lamports |
+| (Other errors same as WithdrawStake) | |
+
+See [WithdrawStake](./9_withdraw_stake) for full documentation.

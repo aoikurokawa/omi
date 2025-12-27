@@ -1,0 +1,72 @@
+---
+title: Redelegate
+description: Transfer stake from one validator to another within the pool.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 22 |
+| Required Authority | Staker |
+| Status | Deprecated |
+
+The `Redelegate` instruction transfers stake from one validator to another within the pool. This uses the native stake program's redelegate feature.
+
+> **Note**: This instruction is deprecated. Consider using decrease + increase operations instead for more predictable behavior.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 4 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 5 | Source Validator Stake | ✅ | ❌ | Source validator's stake PDA |
+| 6 | Source Transient Stake | ✅ | ❌ | Source validator's transient PDA |
+| 7 | Ephemeral Stake | ✅ | ❌ | Temporary stake account PDA |
+| 8 | Dest Transient Stake | ✅ | ❌ | Destination validator's transient PDA |
+| 9 | Dest Validator Stake | ❌ | ❌ | Destination validator's stake PDA |
+| 10 | Dest Vote Account | ❌ | ❌ | Destination validator's vote account |
+| 11 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 12 | Stake History | ❌ | ❌ | Stake history sysvar |
+| 13 | Stake Config | ❌ | ❌ | Stake config account |
+| 14 | System Program | ❌ | ❌ | System program |
+| 15 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount to redelegate |
+| `source_transient_stake_seed` | u64 | Source transient seed |
+| `ephemeral_stake_seed` | u64 | Ephemeral stake seed |
+| `dest_transient_stake_seed` | u64 | Destination transient seed |
+
+## Alternative Approach
+
+Instead of `Redelegate`, use:
+
+```typescript
+// 1. Decrease stake from source validator
+await decreaseValidatorStake(pool, sourceValidator, amount);
+
+// 2. Wait for next epoch
+await waitForNextEpoch();
+
+// 3. Update pool to merge deactivated stake to reserve
+await updateValidatorListBalance(pool);
+
+// 4. Increase stake to destination validator
+await increaseValidatorStake(pool, destValidator, amount);
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker didn't sign |
+| `ValidatorNotFound` | Validator not in pool |
+| `InsufficientFunds` | Insufficient source stake |

@@ -1,4 +1,4 @@
 {
   "title": "Stake Pool",
-  "pages": ["index"]
+  "pages": ["index", "stake-pool-accounts", "lifecycle", "instructions"]
 }

@@ -1,0 +1,40 @@
+---
+title: DepositStakeWithAuthority
+description: Deposit a stake account with explicit deposit authority signature.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 8 (with authority) |
+| Required Authority | User + Deposit Authority |
+
+This is a variant of `DepositStake` used when the pool has a `stake_deposit_authority` set. The deposit authority must sign in addition to the stake owner.
+
+## Accounts
+
+Same as [DepositStake](./8_deposit_stake), with the addition of:
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| ... | (Same as DepositStake) | | | |
+| 15 | Stake Deposit Authority | ❌ | ✅ | Pool's stake deposit authority |
+
+## Usage
+
+```rust
+// When pool has stake_deposit_authority set
+if stake_pool_data.stake_deposit_authority.is_some() {
+    // Authority must also sign
+    let deposit_ix = deposit_stake_with_authority(
+        stake_pool,
+        deposit_authority, // Must sign
+        user_stake,
+        user_stake_authority,
+        user_token_account,
+    );
+}
+```
+
+See [DepositStake](./8_deposit_stake) for full documentation.

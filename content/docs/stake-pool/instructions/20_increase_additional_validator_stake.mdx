@@ -1,0 +1,75 @@
+---
+title: IncreaseAdditionalValidatorStake
+description: Increase validator stake using ephemeral accounts for same-epoch operations.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 20 |
+| Required Authority | Staker |
+
+The `IncreaseAdditionalValidatorStake` instruction increases stake to a validator when a transient stake account already exists. It uses ephemeral stake accounts for atomic same-epoch operations.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 4 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 5 | Ephemeral Stake | ✅ | ❌ | Temporary stake account PDA |
+| 6 | Transient Stake | ✅ | ❌ | Validator's transient stake PDA |
+| 7 | Validator Stake | ❌ | ❌ | Validator's main stake PDA |
+| 8 | Vote Account | ❌ | ❌ | Validator's vote account |
+| 9 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 10 | Stake History | ❌ | ❌ | Stake history sysvar |
+| 11 | Stake Config | ❌ | ❌ | Stake config account |
+| 12 | System Program | ❌ | ❌ | System program |
+| 13 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount to stake |
+| `transient_stake_seed` | u64 | Seed for transient stake PDA |
+| `ephemeral_stake_seed` | u64 | Seed for ephemeral stake PDA |
+
+## Behavior
+
+1. Creates ephemeral stake account from reserve
+2. Delegates ephemeral stake to validator
+3. Merges ephemeral stake into existing transient stake
+4. Updates validator's transient stake balance
+
+## When to Use
+
+Use this instead of `IncreaseValidatorStake` when:
+- A transient stake already exists for this validator
+- You need multiple stake increases in the same epoch
+
+```typescript
+// Check if transient stake exists
+const validatorInfo = await getValidatorStakeInfo(pool, voteAccount);
+
+if (validatorInfo.transientStakeLamports > 0) {
+    // Use IncreaseAdditionalValidatorStake
+    await increaseAdditionalValidatorStake(pool, voteAccount, amount);
+} else {
+    // Use IncreaseValidatorStake
+    await increaseValidatorStake(pool, voteAccount, amount);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker didn't sign |
+| `ValidatorNotFound` | Validator not in pool |
+| `ReserveDepleted` | Insufficient reserve balance |
+| `WrongStakeState` | No existing transient stake |

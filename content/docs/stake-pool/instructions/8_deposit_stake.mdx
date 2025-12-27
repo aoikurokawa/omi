@@ -1,0 +1,256 @@
+---
+title: DepositStake
+description: Deposit an existing stake account into the pool and receive LST tokens.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 8 |
+| Required Authority | User (stake owner) |
+
+The `DepositStake` instruction allows users to deposit an existing stake account into the pool. The stake is merged with the pool's validator stake, and the user receives pool tokens (LST) representing their share.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 2 | Deposit Authority | ❌ | ❌ | Pool's stake deposit authority PDA |
+| 3 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 4 | User Stake Account | ✅ | ❌ | User's stake account to deposit |
+| 5 | Validator Stake Account | ✅ | ❌ | Pool's stake account for this validator |
+| 6 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 7 | User Token Account | ✅ | ❌ | User's pool token account (receives LST) |
+| 8 | Manager Fee Account | ✅ | ❌ | Manager's fee token account |
+| 9 | Referrer Token Account | ✅ | ❌ | Referrer's token account (or manager's) |
+| 10 | Pool Mint | ✅ | ❌ | Pool token mint |
+| 11 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 12 | Stake History Sysvar | ❌ | ❌ | Stake history sysvar |
+| 13 | Token Program | ❌ | ❌ | SPL Token program |
+| 14 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+None.
+
+## Behavior
+
+1. Validates user's stake account:
+   - Is delegated to a validator in the pool
+   - Is fully activated (not warming up)
+   - Has matching lockup with pool
+2. Authorizes stake account to pool's deposit authority
+3. Merges stake into pool's validator stake account
+4. Calculates pool tokens to mint:
+   - Based on stake amount and current exchange rate
+   - Minus deposit fee
+5. Mints pool tokens:
+   - Deposit fee tokens to manager (and referrer)
+   - Remaining tokens to user
+
+## Token Calculation
+
+```
+stake_value = user_stake_lamports
+pool_tokens = stake_value × (pool_token_supply / total_pool_lamports)
+
+deposit_fee = pool_tokens × (deposit_fee_numerator / deposit_fee_denominator)
+referral_fee = deposit_fee × (referral_fee_percentage / 100)
+
+manager_receives = deposit_fee - referral_fee
+referrer_receives = referral_fee
+user_receives = pool_tokens - deposit_fee
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::deposit_stake;
+
+fn deposit_stake_account(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    user_stake: &Pubkey,
+    user_stake_authority: &Keypair,
+    user_token_account: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    // Get the validator this stake is delegated to
+    let stake_account = client.get_account(user_stake)?;
+    let stake_state = parse_stake_account(&stake_account.data)?;
+    let vote_account = stake_state.delegation.voter_pubkey;
+    
+    // Derive PDAs
+    let (deposit_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"deposit"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (validator_stake, _) = Pubkey::find_program_address(
+        &[
+            vote_account.as_ref(),
+            stake_pool.as_ref(),
+            b"validator",
+        ],
+        &spl_stake_pool::id(),
+    );
+    
+    let deposit_ix = deposit_stake(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &stake_pool_data.validator_list,
+        &deposit_authority,
+        &withdraw_authority,
+        user_stake,
+        &user_stake_authority.pubkey(),
+        &validator_stake,
+        &stake_pool_data.reserve_stake,
+        user_token_account,
+        &stake_pool_data.manager_fee_account,
+        &stake_pool_data.manager_fee_account, // referrer (use manager if none)
+        &stake_pool_data.pool_mint,
+        &stake_pool_data.token_program_id,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[deposit_ix],
+        Some(&user_stake_authority.pubkey()),
+        &[user_stake_authority],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Deposited stake account {}", user_stake);
+    Ok(())
+}
+```
+
+### TypeScript
+
+```typescript
+import { depositStake } from '@solana/spl-stake-pool';
+
+async function deposit(
+    connection: Connection,
+    stakePool: PublicKey,
+    userStake: PublicKey,
+    userStakeAuthority: Keypair,
+    userTokenAccount: PublicKey,
+) {
+    const poolData = await getStakePoolAccount(connection, stakePool);
+    
+    const instruction = depositStake(
+        STAKE_POOL_PROGRAM_ID,
+        stakePool,
+        poolData.account.data.validatorList,
+        userStake,
+        userTokenAccount,
+        poolData.account.data.managerFeeAccount,
+        poolData.account.data.managerFeeAccount, // referrer
+    );
+    
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [userStakeAuthority],
+    );
+    
+    console.log('Deposit complete:', signature);
+}
+```
+
+### CLI
+
+```bash
+# Deposit a stake account into the pool
+spl-stake-pool deposit-stake <POOL_ADDRESS> <STAKE_ACCOUNT_ADDRESS>
+
+# With referrer
+spl-stake-pool deposit-stake <POOL_ADDRESS> <STAKE_ACCOUNT_ADDRESS> \
+    --referrer <REFERRER_TOKEN_ACCOUNT>
+```
+
+## Prerequisites
+
+Before depositing, the stake account must:
+
+1. **Be Delegated**: To a validator in the pool
+2. **Be Fully Active**: Not in warmup state
+3. **Match Lockup**: Same lockup as pool's stake accounts
+4. **Have Correct Authorities**: User must be able to sign
+
+```typescript
+// Check stake account eligibility
+async function canDeposit(
+    connection: Connection,
+    stakeAccount: PublicKey,
+    stakePool: StakePool
+): Promise<{ eligible: boolean; reason?: string }> {
+    const stakeAccountInfo = await connection.getParsedAccountInfo(stakeAccount);
+    const stakeState = stakeAccountInfo.value?.data.parsed;
+    
+    // Check if delegated
+    if (!stakeState?.info?.stake?.delegation) {
+        return { eligible: false, reason: 'Stake not delegated' };
+    }
+    
+    // Check if validator is in pool
+    const voteAccount = stakeState.info.stake.delegation.voter;
+    const validatorList = await getValidatorList(connection, stakePool.validatorList);
+    const inPool = validatorList.validators.some(
+        v => v.voteAccountAddress.toBase58() === voteAccount
+    );
+    
+    if (!inPool) {
+        return { eligible: false, reason: 'Validator not in pool' };
+    }
+    
+    // Check activation status
+    const activation = await connection.getStakeActivation(stakeAccount);
+    if (activation.state !== 'active') {
+        return { eligible: false, reason: `Stake is ${activation.state}` };
+    }
+    
+    return { eligible: true };
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InvalidState` | Stake not active or in wrong state |
+| `ValidatorNotFound` | Stake delegated to validator not in pool |
+| `WrongAccountMint` | Token account wrong mint |
+| `StakeListOutOfDate` | Pool needs epoch update first |
+| `SignatureMissing` | Stake authority did not sign |
+
+## Deposit vs DepositSol
+
+| Feature | DepositStake | DepositSol |
+|---------|--------------|------------|
+| **Input** | Existing stake account | SOL |
+| **Warmup** | Already active | Starts warmup |
+| **Validator** | Must match stake's validator | Any (preferably preferred) |
+| **Fee Type** | Stake deposit fee | SOL deposit fee |
+
+## Best Practices
+
+1. **Check Eligibility**: Verify stake account can be deposited
+2. **Verify Exchange Rate**: Confirm expected tokens before deposit
+3. **Use Referral**: Include referrer to share fees
+4. **Check Pool Status**: Ensure pool is updated for current epoch

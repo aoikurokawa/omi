@@ -1,0 +1,151 @@
+---
+title: CreateTokenMetadata
+description: Create Metaplex token metadata for the pool's LST token.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 16 |
+| Required Authority | Manager |
+
+The `CreateTokenMetadata` instruction creates Metaplex token metadata for the pool's LST token. This enables the token to display a name, symbol, and image in wallets and explorers.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Pool Mint | ❌ | ❌ | Pool token mint |
+| 4 | Payer | ✅ | ✅ | Pays for metadata account rent |
+| 5 | Metadata Account | ✅ | ❌ | Token metadata PDA |
+| 6 | Metadata Program | ❌ | ❌ | Metaplex Token Metadata program |
+| 7 | System Program | ❌ | ❌ | System program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Token name (e.g., "Jito Staked SOL") |
+| `symbol` | String | Token symbol (e.g., "JitoSOL") |
+| `uri` | String | URI to off-chain metadata JSON |
+
+## Behavior
+
+1. Validates manager signature
+2. Derives metadata account PDA from mint
+3. Creates metadata account via Metaplex CPI
+4. Sets metadata with provided name, symbol, and URI
+5. Sets update authority to pool's withdraw authority
+
+## Metadata URI
+
+The URI should point to a JSON file with the token's off-chain metadata:
+
+```json
+{
+    "name": "Jito Staked SOL",
+    "symbol": "JitoSOL",
+    "description": "Liquid staking token for the Jito stake pool",
+    "image": "https://example.com/jitosol.png",
+    "external_url": "https://jito.network",
+    "attributes": [
+        {
+            "trait_type": "Category",
+            "value": "Liquid Staking Token"
+        }
+    ]
+}
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::create_token_metadata;
+
+fn create_metadata(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    payer: &Keypair,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    // Derive metadata PDA
+    let (metadata, _) = Pubkey::find_program_address(
+        &[
+            b"metadata",
+            mpl_token_metadata::ID.as_ref(),
+            stake_pool_data.pool_mint.as_ref(),
+        ],
+        &mpl_token_metadata::ID,
+    );
+    
+    let create_ix = create_token_metadata(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        &withdraw_authority,
+        &stake_pool_data.pool_mint,
+        &payer.pubkey(),
+        "My Staked SOL".to_string(),
+        "mSOL".to_string(),
+        "https://example.com/metadata.json".to_string(),
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[create_ix],
+        Some(&payer.pubkey()),
+        &[payer, manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Token metadata created");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Create token metadata
+spl-stake-pool create-token-metadata <POOL_ADDRESS> \
+    --name "My Staked SOL" \
+    --symbol "mSOL" \
+    --uri "https://example.com/metadata.json"
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+| `AlreadyInUse` | Metadata already exists |
+
+## Metadata Account
+
+The metadata account is a PDA derived from:
+
+```rust
+seeds = ["metadata", token_metadata_program_id, mint_address]
+```
+
+## Best Practices
+
+1. **Host Metadata**: Use reliable hosting (IPFS, Arweave, or CDN)
+2. **High-Quality Image**: Use a clear, recognizable token icon
+3. **Consistent Branding**: Match website and documentation
+4. **Include Description**: Help users understand the token

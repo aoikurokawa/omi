@@ -1,0 +1,73 @@
+---
+title: WithdrawSolWithSlippage
+description: Withdraw SOL with minimum lamports output protection.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 26 |
+| Required Authority | User (token holder) |
+
+The `WithdrawSolWithSlippage` instruction is identical to `WithdrawSol` but includes slippage protection. The transaction will fail if the user would receive fewer lamports than specified.
+
+## Accounts
+
+Same as [WithdrawSol](./15_withdraw_sol).
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pool_tokens` | u64 | Amount of pool tokens to burn |
+| `minimum_lamports_out` | u64 | Minimum lamports to receive |
+
+## Behavior
+
+Same as `WithdrawSol`, plus:
+- After calculating lamports to withdraw, validates against minimum
+- Fails if `lamports_to_user < minimum_lamports_out`
+
+## Examples
+
+### TypeScript
+
+```typescript
+async function withdrawSolSafe(
+    connection: Connection,
+    stakePool: PublicKey,
+    user: Keypair,
+    userTokenAccount: PublicKey,
+    poolTokens: bigint,
+    slippageBps: number = 50, // 0.5%
+) {
+    const poolData = await getStakePool(connection, stakePool);
+    
+    // Calculate expected lamports
+    const expectedLamports = getWithdrawalQuote(poolData, poolTokens);
+    
+    // Apply slippage tolerance
+    const minimumLamports = expectedLamports * BigInt(10000 - slippageBps) / 10000n;
+    
+    const instruction = withdrawSolWithSlippage(
+        stakePool,
+        user.publicKey,
+        userTokenAccount,
+        poolTokens,
+        minimumLamports,
+    );
+    
+    await sendTransaction(instruction, [user]);
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `ExceededSlippage` | Would receive less than minimum lamports |
+| `ReserveDepleted` | Insufficient reserve balance |
+| (Other errors same as WithdrawSol) | |
+
+See [WithdrawSol](./15_withdraw_sol) for full documentation.

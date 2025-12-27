@@ -1,0 +1,248 @@
+---
+title: DepositSol
+description: Deposit SOL directly into the pool and receive LST tokens.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 13 |
+| Required Authority | User |
+
+The `DepositSol` instruction allows users to deposit SOL directly into the pool's reserve and receive pool tokens (LST). This is the simplest way to enter a stake pool.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 2 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 3 | User SOL Source | ✅ | ✅ | User's wallet (SOL source) |
+| 4 | User Token Account | ✅ | ❌ | User's pool token account |
+| 5 | Manager Fee Account | ✅ | ❌ | Manager's fee token account |
+| 6 | Referrer Token Account | ✅ | ❌ | Referrer's token account |
+| 7 | Pool Mint | ✅ | ❌ | Pool token mint |
+| 8 | System Program | ❌ | ❌ | System program |
+| 9 | Token Program | ❌ | ❌ | SPL Token program |
+| 10 | (Optional) SOL Deposit Authority | ❌ | ✅ | If deposits are restricted |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount of SOL to deposit |
+
+## Behavior
+
+1. Validates user has sufficient SOL balance
+2. If SOL deposit authority is set, requires its signature
+3. Transfers SOL from user to reserve stake account
+4. Calculates pool tokens to mint based on exchange rate
+5. Applies deposit fee
+6. Mints tokens:
+   - Fee tokens to manager (and referrer)
+   - Remaining tokens to user
+7. Updates pool's `total_lamports`
+
+## Token Calculation
+
+```
+deposit_value = lamports
+pool_tokens = deposit_value × (pool_token_supply / total_pool_lamports)
+
+deposit_fee = pool_tokens × (sol_deposit_fee_numerator / sol_deposit_fee_denominator)
+referral_fee = deposit_fee × (sol_referral_fee / 100)
+
+manager_receives = deposit_fee - referral_fee
+referrer_receives = referral_fee
+user_receives = pool_tokens - deposit_fee
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::deposit_sol;
+
+fn deposit_sol_to_pool(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    user: &Keypair,
+    user_token_account: &Pubkey,
+    lamports: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let deposit_ix = deposit_sol(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &withdraw_authority,
+        &stake_pool_data.reserve_stake,
+        &user.pubkey(),
+        user_token_account,
+        &stake_pool_data.manager_fee_account,
+        &stake_pool_data.manager_fee_account, // referrer (use manager if none)
+        &stake_pool_data.pool_mint,
+        &stake_pool_data.token_program_id,
+        lamports,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[deposit_ix],
+        Some(&user.pubkey()),
+        &[user],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Deposited {} lamports", lamports);
+    Ok(())
+}
+```
+
+### TypeScript
+
+```typescript
+import { depositSol } from '@solana/spl-stake-pool';
+
+async function deposit(
+    connection: Connection,
+    stakePool: PublicKey,
+    user: Keypair,
+    userTokenAccount: PublicKey,
+    amount: number, // in SOL
+) {
+    const poolData = await getStakePoolAccount(connection, stakePool);
+    const lamports = amount * LAMPORTS_PER_SOL;
+    
+    const instruction = depositSol(
+        STAKE_POOL_PROGRAM_ID,
+        stakePool,
+        poolData.account.data.reserveStake,
+        user.publicKey,
+        userTokenAccount,
+        poolData.account.data.managerFeeAccount,
+        poolData.account.data.managerFeeAccount, // referrer
+        poolData.account.data.poolMint,
+        lamports,
+    );
+    
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [user],
+    );
+    
+    console.log('Deposit complete:', signature);
+}
+```
+
+### CLI
+
+```bash
+# Deposit 10 SOL
+spl-stake-pool deposit-sol <POOL_ADDRESS> 10
+
+# With referrer
+spl-stake-pool deposit-sol <POOL_ADDRESS> 10 \
+    --referrer <REFERRER_TOKEN_ACCOUNT>
+```
+
+## Quote Before Deposit
+
+```typescript
+async function getDepositQuote(
+    connection: Connection,
+    stakePool: PublicKey,
+    lamports: bigint,
+): Promise<{
+    poolTokens: bigint;
+    fee: bigint;
+    netTokens: bigint;
+}> {
+    const poolData = await getStakePool(connection, stakePool);
+    
+    // Calculate tokens without fee
+    const poolTokens = poolData.totalLamports === 0n
+        ? lamports
+        : (lamports * poolData.poolTokenSupply) / poolData.totalLamports;
+    
+    // Calculate fee
+    const fee = (poolTokens * BigInt(poolData.solDepositFee.numerator)) 
+        / BigInt(poolData.solDepositFee.denominator);
+    
+    return {
+        poolTokens,
+        fee,
+        netTokens: poolTokens - fee,
+    };
+}
+```
+
+## Restricted Deposits
+
+If the pool has a `sol_deposit_authority` set:
+
+```typescript
+// Check if deposits are restricted
+if (poolData.solDepositAuthority) {
+    console.log('Deposits require authority signature');
+    
+    // Authority must sign the transaction
+    const instruction = depositSolWithAuthority(
+        stakePool,
+        depositAuthority, // Must sign
+        user,
+        userTokenAccount,
+        lamports,
+    );
+}
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `InsufficientFunds` | User has insufficient SOL |
+| `WrongAccountMint` | Token account has wrong mint |
+| `StakeListOutOfDate` | Pool needs epoch update |
+| `SignatureMissing` | Deposit authority didn't sign (if restricted) |
+
+## Where Does SOL Go?
+
+```
+User SOL → Reserve Stake Account → (Later) Validators
+
+1. Deposited SOL goes to reserve
+2. Staker calls IncreaseValidatorStake
+3. SOL moves from reserve to validator
+4. Stake warms up and earns rewards
+```
+
+## DepositSol vs DepositStake
+
+| Feature | DepositSol | DepositStake |
+|---------|------------|--------------|
+| **Input** | SOL | Existing stake account |
+| **Ease** | Simpler | Requires stake setup |
+| **Warmup** | Stake must be delegated later | Already active |
+| **Fee Type** | SOL deposit fee | Stake deposit fee |
+| **Validator** | Determined by staker | Must match existing delegation |
+
+## Best Practices
+
+1. **Check Exchange Rate**: Verify expected tokens before deposit
+2. **Account for Fees**: Calculate net tokens after fee
+3. **Create Token Account**: Ensure token account exists first
+4. **Use Referral**: Include referrer to share fees

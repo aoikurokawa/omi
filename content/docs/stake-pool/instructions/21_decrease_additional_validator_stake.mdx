@@ -1,0 +1,60 @@
+---
+title: DecreaseAdditionalValidatorStake
+description: Decrease validator stake using ephemeral accounts for same-epoch operations.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 21 |
+| Required Authority | Staker |
+
+The `DecreaseAdditionalValidatorStake` instruction decreases stake from a validator when a transient stake account already exists. It uses ephemeral stake accounts for atomic same-epoch operations.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Staker | ❌ | ✅ | Pool's staker authority |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 4 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 5 | Validator Stake | ✅ | ❌ | Validator's main stake PDA |
+| 6 | Ephemeral Stake | ✅ | ❌ | Temporary stake account PDA |
+| 7 | Transient Stake | ✅ | ❌ | Validator's transient stake PDA |
+| 8 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 9 | Stake History | ❌ | ❌ | Stake history sysvar |
+| 10 | System Program | ❌ | ❌ | System program |
+| 11 | Stake Program | ❌ | ❌ | Native stake program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lamports` | u64 | Amount to unstake |
+| `transient_stake_seed` | u64 | Seed for transient stake PDA |
+| `ephemeral_stake_seed` | u64 | Seed for ephemeral stake PDA |
+
+## Behavior
+
+1. Splits stake from validator stake to ephemeral account
+2. Deactivates ephemeral stake
+3. Merges ephemeral stake into existing transient stake
+4. Updates validator's transient stake balance
+
+## When to Use
+
+Use this instead of `DecreaseValidatorStakeWithReserve` when:
+- A transient stake already exists for this validator
+- You need multiple stake decreases in the same epoch
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Staker didn't sign |
+| `ValidatorNotFound` | Validator not in pool |
+| `InsufficientFunds` | Insufficient validator stake |
+| `WrongStakeState` | No existing transient stake |

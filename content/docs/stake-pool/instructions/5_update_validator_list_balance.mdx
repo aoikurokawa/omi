@@ -1,0 +1,235 @@
+---
+title: UpdateValidatorListBalance
+description: Update the recorded stake balances for validators in the pool.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 5 |
+| Required Authority | None (permissionless) |
+
+The `UpdateValidatorListBalance` instruction updates the recorded stake amounts for validators in the pool. This is essential epoch maintenance that should be run at the start of each epoch.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 2 | Validator List | ✅ | ❌ | Pool's validator list account |
+| 3 | Reserve Stake | ✅ | ❌ | Pool's reserve stake account |
+| 4 | Clock Sysvar | ❌ | ❌ | Clock sysvar |
+| 5 | Stake History Sysvar | ❌ | ❌ | Stake history sysvar |
+| 6 | Stake Program | ❌ | ❌ | Native stake program |
+| 7+ | Validator/Transient Stake Pairs | ✅ | ❌ | Pairs of validator and transient stake accounts |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_index` | u32 | Starting index in validator list |
+| `no_merge` | bool | If true, skip merging transient stakes |
+
+## Behavior
+
+For each validator in the batch:
+
+1. Read actual balance from validator stake account
+2. Read actual balance from transient stake account
+3. Update `active_stake_lamports` in validator list
+4. Update `transient_stake_lamports` in validator list
+5. If transient stake is fully activated/deactivated and `no_merge` is false:
+   - Merge transient stake into validator stake (if activated)
+   - Merge transient stake into reserve (if deactivated)
+6. Update validator's `last_update_epoch`
+7. Update validator status if needed
+
+## Batching
+
+Due to compute limits, validators must be updated in batches:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Batch Update Process                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Validator List (100 validators)                                │
+│  ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐ │
+│  │  0  │  1  │  2  │  3  │  4  │ ... │ 95  │ 96  │ 97  │ 98  │ │
+│  └──┬──┴──┬──┴──┬──┴──┬──┴──┬──┴─────┴──┬──┴──┬──┴──┬──┴──┬──┘ │
+│     │     │     │     │     │           │     │     │     │    │
+│     └─────┴─────┴─────┴─────┘           └─────┴─────┴─────┘    │
+│           Batch 1 (0-4)                    Batch 20 (95-99)    │
+│           TX 1                             TX 20               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::update_validator_list_balance;
+
+fn update_all_validators(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    let validator_list = get_validator_list(client, &stake_pool_data.validator_list)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    const VALIDATORS_PER_TX: usize = 5;
+    let validator_count = validator_list.validators.len();
+    
+    for start_index in (0..validator_count).step_by(VALIDATORS_PER_TX) {
+        let end_index = std::cmp::min(start_index + VALIDATORS_PER_TX, validator_count);
+        
+        // Build account list for this batch
+        let mut validator_and_transient_accounts = Vec::new();
+        
+        for i in start_index..end_index {
+            let validator = &validator_list.validators[i];
+            
+            let (validator_stake, _) = Pubkey::find_program_address(
+                &[
+                    validator.vote_account_address.as_ref(),
+                    stake_pool.as_ref(),
+                    b"validator",
+                ],
+                &spl_stake_pool::id(),
+            );
+            
+            let (transient_stake, _) = Pubkey::find_program_address(
+                &[
+                    b"transient",
+                    validator.vote_account_address.as_ref(),
+                    stake_pool.as_ref(),
+                    &validator.transient_seed_suffix.to_le_bytes(),
+                ],
+                &spl_stake_pool::id(),
+            );
+            
+            validator_and_transient_accounts.push(validator_stake);
+            validator_and_transient_accounts.push(transient_stake);
+        }
+        
+        let update_ix = update_validator_list_balance(
+            &spl_stake_pool::id(),
+            stake_pool,
+            &withdraw_authority,
+            &stake_pool_data.validator_list,
+            &stake_pool_data.reserve_stake,
+            &validator_and_transient_accounts,
+            start_index as u32,
+            false, // merge transient stakes
+        );
+        
+        let tx = Transaction::new_signed_with_payer(
+            &[update_ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            client.get_latest_blockhash()?,
+        );
+        
+        client.send_and_confirm_transaction(&tx)?;
+        println!("Updated validators {} to {}", start_index, end_index - 1);
+    }
+    
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Update validator list balance (handles batching automatically)
+spl-stake-pool update <POOL_ADDRESS>
+```
+
+## Merge Behavior
+
+### Transient → Validator (Activation Complete)
+
+When transient stake has fully activated:
+
+```
+Before:
+  Validator Stake: 50 SOL (active)
+  Transient Stake: 10 SOL (active, was warming up)
+
+After merge:
+  Validator Stake: 60 SOL (active)
+  Transient Stake: (closed)
+```
+
+### Transient → Reserve (Deactivation Complete)
+
+When transient stake has fully deactivated:
+
+```
+Before:
+  Validator Stake: 40 SOL (active)
+  Transient Stake: 10 SOL (inactive, was cooling down)
+  Reserve: 100 SOL
+
+After merge:
+  Validator Stake: 40 SOL (active)
+  Transient Stake: (closed)
+  Reserve: 110 SOL
+```
+
+## Status Updates
+
+The instruction updates validator status based on stake state:
+
+| Current Status | Condition | New Status |
+|----------------|-----------|------------|
+| `DeactivatingTransient` | Transient merged to reserve | `Active` |
+| `DeactivatingValidator` | Validator stake merged to reserve | `ReadyForRemoval` |
+| `DeactivatingAll` | All stake merged to reserve | `ReadyForRemoval` |
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `WrongAccountOwner` | Invalid stake account owner |
+| `StakeListOutOfDate` | Already updated this epoch |
+| `InvalidState` | Validator list corrupted |
+
+## When to Call
+
+Call `UpdateValidatorListBalance`:
+
+1. **Start of Each Epoch**: Update all validators
+2. **Before Pool Operations**: Ensure balances are current
+3. **After Stake Changes**: Reflect new stake distribution
+
+```typescript
+async function ensureUpdated(
+    connection: Connection,
+    stakePool: StakePool
+) {
+    const currentEpoch = (await connection.getEpochInfo()).epoch;
+    
+    if (stakePool.lastUpdateEpoch < currentEpoch) {
+        await updateValidatorListBalance(stakePool);
+        await updateStakePoolBalance(stakePool);
+    }
+}
+```
+
+## Best Practices
+
+1. **Update Every Epoch**: Run at the start of each epoch
+2. **Batch Appropriately**: Use 5 validators per transaction
+3. **Handle Failures**: Retry failed batches
+4. **Order Matters**: Update validator list before pool balance
+5. **Use no_merge Wisely**: Usually false to complete stake transitions

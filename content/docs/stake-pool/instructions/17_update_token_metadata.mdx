@@ -1,0 +1,117 @@
+---
+title: UpdateTokenMetadata
+description: Update the Metaplex token metadata for the pool's LST token.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 17 |
+| Required Authority | Manager |
+
+The `UpdateTokenMetadata` instruction updates the Metaplex token metadata for the pool's LST token. Use this to change the token's name, symbol, or metadata URI.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ❌ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+| 2 | Withdraw Authority | ❌ | ❌ | Pool's withdraw authority PDA |
+| 3 | Metadata Account | ✅ | ❌ | Token metadata PDA |
+| 4 | Metadata Program | ❌ | ❌ | Metaplex Token Metadata program |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | New token name |
+| `symbol` | String | New token symbol |
+| `uri` | String | New URI to off-chain metadata |
+
+## Behavior
+
+1. Validates manager signature
+2. Updates metadata via Metaplex CPI
+3. Changes name, symbol, and URI
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::update_token_metadata;
+
+fn update_metadata(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    new_name: &str,
+    new_symbol: &str,
+    new_uri: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stake_pool_data = get_stake_pool(client, stake_pool)?;
+    
+    let (withdraw_authority, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), b"withdraw"],
+        &spl_stake_pool::id(),
+    );
+    
+    let (metadata, _) = Pubkey::find_program_address(
+        &[
+            b"metadata",
+            mpl_token_metadata::ID.as_ref(),
+            stake_pool_data.pool_mint.as_ref(),
+        ],
+        &mpl_token_metadata::ID,
+    );
+    
+    let update_ix = update_token_metadata(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        &withdraw_authority,
+        &metadata,
+        new_name.to_string(),
+        new_symbol.to_string(),
+        new_uri.to_string(),
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[update_ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    
+    println!("Token metadata updated");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Update token metadata
+spl-stake-pool update-token-metadata <POOL_ADDRESS> \
+    --name "Updated Staked SOL" \
+    --symbol "uSOL" \
+    --uri "https://example.com/new-metadata.json"
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+| `InvalidState` | Metadata doesn't exist |
+
+## Use Cases
+
+- **Rebranding**: Update name or symbol
+- **New Image**: Change the URI to point to new artwork
+- **Fix Errors**: Correct typos or broken links

@@ -1,192 +1,292 @@
 ---
-title: SPL Stake Pool
-description: Liquid staking on Solana with stake pools
+title: Introduction
+description: SPL Stake Pool program for liquid staking on Solana
 ---
 
-# SPL Stake Pool
+The SPL Stake Pool program enables **liquid staking** on Solana. Users deposit SOL or stake accounts and receive liquid staking tokens (LSTs) representing their share of the pool. These tokens can be traded, used in DeFi, or redeemed for the underlying stake.
 
-The SPL Stake Pool program enables **liquid staking** on Solana. Users deposit SOL and receive liquid staking tokens (LSTs) that represent their share of the pool.
+| Property | Value |
+|----------|-------|
+| Program Address | `SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy` |
+| License | Apache-2.0 |
+| Source | [github.com/solana-program/stake-pool](https://github.com/solana-program/stake-pool) |
+
+## Key Features
+
+- **Liquid Staking**: Receive tradeable LST tokens for deposited SOL
+- **Multi-Validator Delegation**: Stake distributed across multiple validators
+- **Instant Liquidity**: Trade LSTs on DEXs without waiting for deactivation
+- **Auto-Compounding**: Rewards automatically increase LST value
+- **Flexible Deposits**: Deposit SOL directly or existing stake accounts
+- **Fee Structure**: Configurable epoch, deposit, withdrawal, and referral fees
 
 ## Interactive Visualization
 
 <StakePoolFlow />
 
-## How It Works
+## Architecture
 
-### The Problem with Native Staking
+The Stake Pool program manages multiple account types to coordinate liquid staking:
 
-Native staking has limitations:
-- **Illiquidity**: SOL is locked during staking
-- **Long unstaking**: 2-3 day cooldown period
-- **Single validator**: Each stake account delegates to one validator
-- **No DeFi**: Can't use staked SOL in other protocols
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Stake Pool Account                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│  account_type: AccountType                                              │
+│  manager: Pubkey                     (admin authority)                  │
+│  staker: Pubkey                      (stake delegation authority)       │
+│  stake_deposit_authority: Pubkey     (PDA for stake deposits)           │
+│  stake_withdraw_bump_seed: u8                                           │
+│  validator_list: Pubkey              (validator tracking account)       │
+│  reserve_stake: Pubkey               (undelegated SOL reserve)          │
+│  pool_mint: Pubkey                   (LST token mint)                   │
+│  manager_fee_account: Pubkey         (fee destination)                  │
+│  token_program_id: Pubkey                                               │
+│  total_lamports: u64                 (total stake in pool)              │
+│  pool_token_supply: u64              (total LST minted)                 │
+│  last_update_epoch: u64                                                 │
+│  lockup: Lockup                      (stake lockup config)              │
+│  epoch_fee: Fee                      (fee on rewards)                   │
+│  next_epoch_fee: FutureEpoch<Fee>                                       │
+│  preferred_deposit_validator: Option<Pubkey>                            │
+│  preferred_withdraw_validator: Option<Pubkey>                           │
+│  stake_deposit_fee: Fee                                                 │
+│  stake_withdrawal_fee: Fee                                              │
+│  next_stake_withdrawal_fee: FutureEpoch<Fee>                            │
+│  stake_referral_fee: u8              (referral share of deposit fee)    │
+│  sol_deposit_authority: Option<Pubkey>                                  │
+│  sol_deposit_fee: Fee                                                   │
+│  sol_referral_fee: u8                                                   │
+│  sol_withdraw_authority: Option<Pubkey>                                 │
+│  sol_withdrawal_fee: Fee                                                │
+│  next_sol_withdrawal_fee: FutureEpoch<Fee>                              │
+│  last_epoch_pool_token_supply: u64                                      │
+│  last_epoch_total_lamports: u64                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 
-### The Stake Pool Solution
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Validator List Account                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  header: ValidatorListHeader                                            │
+│  │   account_type: AccountType                                          │
+│  │   max_validators: u32                                                │
+│  └───────────────────────────────────────────────────────────────────── │
+│  validators: Vec<ValidatorStakeInfo>                                    │
+│      ├── vote_account_address: Pubkey                                   │
+│      ├── active_stake_lamports: u64                                     │
+│      ├── transient_stake_lamports: u64                                  │
+│      ├── last_update_epoch: u64                                         │
+│      ├── transient_seed_suffix: u64                                     │
+│      ├── unused: u32                                                    │
+│      ├── validator_seed_suffix: u32                                     │
+│      └── status: StakeStatus                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-Stake pools solve these by:
-1. Pooling SOL from many users
-2. Distributing stake across multiple validators
-3. Issuing liquid tokens representing pool shares
-4. Enabling instant "unstaking" via token swaps
-
-## Pool Architecture
-
-### Key Accounts
+## Account Types
 
 | Account | Purpose |
 |---------|---------|
-| **Stake Pool** | Main pool state, tracks total stake and token supply |
-| **Validator List** | List of validators the pool delegates to |
-| **Reserve** | Holds unstaked SOL for withdrawals |
-| **Pool Token Mint** | The LST mint (e.g., JitoSOL, mSOL) |
+| **Stake Pool** | Main pool state tracking total stake, token supply, fees, and authorities |
+| **Validator List** | Tracks all validators and their stake amounts |
+| **Reserve Stake** | Holds undelegated SOL for withdrawals and new delegations |
+| **Pool Token Mint** | The LST token mint (e.g., JitoSOL, mSOL, bSOL) |
+| **Validator Stake Accounts** | PDAs holding delegated stake for each validator |
+| **Transient Stake Accounts** | Temporary accounts for stake in warmup/cooldown |
 
-### Authorities
+## Authorities
 
-| Authority | Role |
-|-----------|------|
-| **Manager** | Add/remove validators, set fees |
-| **Staker** | Increase/decrease validator stake |
-| **Deposit Authority** | (Optional) Restrict who can deposit |
-| **Withdraw Authority** | Program-derived, controls stake accounts |
+The stake pool has multiple authorities with distinct responsibilities:
 
-## User Operations
+| Authority | Role | Can Transfer To |
+|-----------|------|-----------------|
+| **Manager** | Add/remove validators, set fees, manage pool settings | Any pubkey |
+| **Staker** | Increase/decrease validator stake, rebalance pool | Any pubkey |
+| **Deposit Authority** | (Optional) Restrict who can deposit | Manager only |
+| **Withdraw Authority** | Program-derived, controls all stake accounts | N/A (PDA) |
 
-### Deposit SOL
+### Manager Capabilities
 
-```rust
-// User deposits 10 SOL
-deposit_sol(
-    &stake_pool,
-    &user_wallet,
-    &user_token_account,
-    10 * LAMPORTS_PER_SOL,
-)
-// User receives pool tokens based on current exchange rate
-```
+- Add or remove validators from the pool
+- Set and modify all fee parameters
+- Set preferred validators for deposits/withdrawals
+- Update the staker authority
+- Create and update token metadata
 
-The exchange rate is:
-```
-pool_tokens = deposit_amount * total_pool_tokens / total_pool_stake
-```
+### Staker Capabilities
 
-### Deposit Stake
-
-Users can also deposit existing stake accounts:
-
-```rust
-deposit_stake(
-    &stake_pool,
-    &validator_stake_account,
-    &user_stake_account,
-    &user_token_account,
-)
-```
-
-### Withdraw
-
-Users burn pool tokens to receive SOL or stake:
-
-```rust
-withdraw_sol(
-    &stake_pool,
-    &user_token_account,
-    &user_wallet,
-    pool_tokens_to_burn,
-)
-```
-
-## Validator Management
-
-### Adding Validators
-
-The manager adds validators to the pool:
-
-```rust
-add_validator_to_pool(
-    &stake_pool,
-    &validator_vote_account,
-)
-```
-
-### Stake Distribution
-
-The staker authority distributes stake among validators:
-
-```rust
-// Increase stake to a validator
-increase_validator_stake(
-    &stake_pool,
-    &validator_stake_account,
-    lamports_to_add,
-)
-
-// Decrease stake from a validator
-decrease_validator_stake(
-    &stake_pool,
-    &validator_stake_account,
-    lamports_to_remove,
-)
-```
-
-## Epoch Maintenance
-
-Each epoch, the pool must be updated:
-
-### 1. Update Validator List
-
-```rust
-update_validator_list_balance(
-    &stake_pool,
-    &validator_list,
-    start_index,
-    no_merge,
-)
-```
-
-This updates each validator's recorded stake balance.
-
-### 2. Update Pool Balance
-
-```rust
-update_stake_pool_balance(&stake_pool)
-```
-
-This recalculates:
-- Total stake in the pool
-- New exchange rate (including rewards)
-
-### 3. Cleanup Removed Validators
-
-```rust
-cleanup_removed_validator_entries(&stake_pool)
-```
+- Increase stake to validators (from reserve)
+- Decrease stake from validators (to reserve)
+- Redelegate stake between validators
 
 ## Fee Structure
 
-Stake pools can charge fees:
+Stake pools support multiple fee types:
 
-| Fee Type | Description |
-|----------|-------------|
-| **Epoch Fee** | Percentage of rewards each epoch |
-| **Withdrawal Fee** | Fee on withdrawals |
-| **Deposit Fee** | Fee on deposits |
-| **Referral Fee** | Share of deposit fee for referrers |
+| Fee Type | Description | Range |
+|----------|-------------|-------|
+| **Epoch Fee** | Percentage of staking rewards each epoch | 0-100% |
+| **Stake Deposit Fee** | Fee on stake account deposits | 0-100% |
+| **SOL Deposit Fee** | Fee on direct SOL deposits | 0-100% |
+| **Stake Withdrawal Fee** | Fee when withdrawing stake | 0-100% |
+| **SOL Withdrawal Fee** | Fee when withdrawing SOL | 0-100% |
+| **Referral Fee** | Share of deposit fee given to referrer | 0-100% of deposit fee |
 
-## Transient Stake Accounts
+### Fee Changes
 
-When increasing or decreasing validator stake, the pool uses **transient stake accounts**:
+Withdrawal fees have a protection mechanism:
+- Fee increases are capped to prevent sudden large increases
+- Fee changes take effect after a delay (next epoch)
+- This protects stakers from malicious fee manipulation
 
-1. **Increasing**: SOL moves from reserve → transient → validator stake
-2. **Decreasing**: Stake moves from validator → transient → reserve
+## Exchange Rate
 
-This is necessary because stake accounts need warmup/cooldown periods.
+The pool token exchange rate determines how many LST tokens are minted per SOL deposited:
 
-## Why Liquid Staking?
+```
+pool_tokens_minted = deposit_amount × (pool_token_supply / total_pool_lamports)
+```
 
-| Benefit | Explanation |
-|---------|-------------|
-| **Liquidity** | Trade LSTs instantly on DEXs |
-| **DeFi Composability** | Use LSTs as collateral, in LPs, etc. |
-| **Diversification** | Stake spread across many validators |
-| **Instant Unstaking** | Swap LST → SOL without waiting |
-| **Auto-compounding** | Rewards automatically increase LST value |
+As the pool earns staking rewards, `total_pool_lamports` increases while `pool_token_supply` stays constant (minus burns), causing each LST to represent more SOL over time.
+
+## Stake Account States
+
+Validator stake accounts in the pool can be in various states:
+
+| Status | Description |
+|--------|-------------|
+| **Active** | Normal operating state, earning rewards |
+| **DeactivatingTransient** | Transient stake is deactivating |
+| **ReadyForRemoval** | Validator can be removed from the list |
+| **DeactivatingValidator** | Validator's stake is being removed |
+| **DeactivatingAll** | All stake (validator + transient) deactivating |
+
+## Instructions Reference
+
+The Stake Pool program provides 24 instructions for managing stake pools:
+
+### Pool Initialization
+
+| Instruction | Description |
+|-------------|-------------|
+| [Initialize](./instructions/0_initialize) | Create a new stake pool |
+
+### Validator Management
+
+| Instruction | Description |
+|-------------|-------------|
+| [AddValidatorToPool](./instructions/1_add_validator_to_pool) | Add a validator to the pool |
+| [RemoveValidatorFromPool](./instructions/2_remove_validator_from_pool) | Remove a validator from the pool |
+| [SetPreferredValidator](./instructions/19_set_preferred_validator) | Set preferred deposit/withdraw validator |
+
+### Stake Rebalancing
+
+| Instruction | Description |
+|-------------|-------------|
+| [IncreaseValidatorStake](./instructions/3_increase_validator_stake) | Move SOL from reserve to validator |
+| [DecreaseValidatorStakeWithReserve](./instructions/4_decrease_validator_stake) | Move stake from validator to reserve |
+| [IncreaseAdditionalValidatorStake](./instructions/20_increase_additional_validator_stake) | Additional stake increase in same epoch |
+| [DecreaseAdditionalValidatorStake](./instructions/21_decrease_additional_validator_stake) | Additional stake decrease in same epoch |
+| [Redelegate](./instructions/22_redelegate) | Transfer stake between validators |
+
+### Epoch Maintenance
+
+| Instruction | Description |
+|-------------|-------------|
+| [UpdateValidatorListBalance](./instructions/5_update_validator_list_balance) | Update validator stake balances |
+| [UpdateStakePoolBalance](./instructions/6_update_stake_pool_balance) | Recalculate pool totals and fees |
+| [CleanupRemovedValidatorEntries](./instructions/7_cleanup_removed_validator_entries) | Remove inactive validator entries |
+
+### User Deposits
+
+| Instruction | Description |
+|-------------|-------------|
+| [DepositStake](./instructions/8_deposit_stake) | Deposit a stake account |
+| [DepositSol](./instructions/13_deposit_sol) | Deposit SOL directly |
+| [DepositStakeWithSlippage](./instructions/23_deposit_stake_with_slippage) | Deposit stake with minimum output |
+| [DepositSolWithSlippage](./instructions/24_deposit_sol_with_slippage) | Deposit SOL with minimum output |
+
+### User Withdrawals
+
+| Instruction | Description |
+|-------------|-------------|
+| [WithdrawStake](./instructions/9_withdraw_stake) | Withdraw stake from pool |
+| [WithdrawSol](./instructions/15_withdraw_sol) | Withdraw SOL from reserve |
+| [WithdrawStakeWithSlippage](./instructions/25_withdraw_stake_with_slippage) | Withdraw stake with minimum output |
+| [WithdrawSolWithSlippage](./instructions/26_withdraw_sol_with_slippage) | Withdraw SOL with minimum output |
+
+### Administration
+
+| Instruction | Description |
+|-------------|-------------|
+| [SetManager](./instructions/10_set_manager) | Change pool manager |
+| [SetFee](./instructions/11_set_fee) | Update fee parameters |
+| [SetStaker](./instructions/12_set_staker) | Change staker authority |
+| [SetFundingAuthority](./instructions/14_set_funding_authority) | Set deposit/withdraw authority |
+
+### Token Metadata
+
+| Instruction | Description |
+|-------------|-------------|
+| [CreateTokenMetadata](./instructions/16_create_token_metadata) | Create MPL token metadata |
+| [UpdateTokenMetadata](./instructions/17_update_token_metadata) | Update token metadata |
+
+## Program-Derived Addresses
+
+The stake pool uses several PDAs for account management:
+
+### Withdraw Authority
+
+```rust
+find_withdraw_authority_program_address(
+    &spl_stake_pool::id(),
+    &stake_pool_address,
+) // Seeds: [stake_pool_address, "withdraw"]
+```
+
+### Validator Stake Account
+
+```rust
+find_stake_program_address(
+    &spl_stake_pool::id(),
+    &vote_account_address,
+    &stake_pool_address,
+    seed: Option<NonZeroU32>,
+) // Seeds: [vote_account, stake_pool, "validator", seed?]
+```
+
+### Transient Stake Account
+
+```rust
+find_transient_stake_program_address(
+    &spl_stake_pool::id(),
+    &vote_account_address,
+    &stake_pool_address,
+    seed: u64,
+) // Seeds: [vote_account, stake_pool, "transient", seed]
+```
+
+### Ephemeral Stake Account
+
+```rust
+find_ephemeral_stake_program_address(
+    &spl_stake_pool::id(),
+    &stake_pool_address,
+    seed: u64,
+) // Seeds: [stake_pool, "ephemeral", seed]
+```
+
+## Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MINIMUM_RESERVE_LAMPORTS` | 0 | Minimum reserve balance |
+| `MINIMUM_ACTIVE_STAKE` | 1,000,000 | Minimum lamports in validator stake for merges |
+| `MAX_VALIDATORS_TO_UPDATE` | 5 | Max validators per update instruction |
+| `MAX_POOL_SIZE` | 20,000 | Maximum validators in a pool |
+
+## Next Steps
+
+- [Stake Pool Accounts](./stake-pool-accounts) - Understanding account structures
+- [Instructions](./instructions) - Complete instruction reference
+- [Lifecycle](./lifecycle) - Epoch maintenance and stake transitions

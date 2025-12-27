@@ -10,7 +10,8 @@ description: Initialize a stake account with authorized signers and optional loc
 | Instruction Index | 0 |
 | Estimated CU | ~7,500 |
 
-The `Initialize` instruction sets up a stake account's metadata including the stake authority, withdraw authority, and lockup configuration. The account must be created (via System Program) before initialization.
+The `Initialize` instruction sets up a stake account's metadata including the stake authority, withdraw authority, and lockup configuration.
+The account must be created (via System Program) before initialization.
 
 ## Accounts
 
@@ -50,115 +51,6 @@ pub struct Lockup {
 4. Account enters `Initialized` state, ready for delegation
 
 ## Examples
-
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  Keypair,
-  SystemProgram,
-  Transaction,
-  StakeProgram,
-  LAMPORTS_PER_SOL,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-const payer = Keypair.generate();
-const stakeAccount = Keypair.generate();
-
-// Request airdrop for testing
-await connection.requestAirdrop(payer.publicKey, 10 * LAMPORTS_PER_SOL);
-
-// Calculate rent-exempt minimum
-const rentExemptBalance = await connection.getMinimumBalanceForRentExemption(
-  StakeProgram.space
-);
-
-// Create and initialize stake account
-const tx = new Transaction().add(
-  // Create the account
-  SystemProgram.createAccount({
-    fromPubkey: payer.publicKey,
-    newAccountPubkey: stakeAccount.publicKey,
-    lamports: rentExemptBalance + 5 * LAMPORTS_PER_SOL,
-    space: StakeProgram.space,
-    programId: StakeProgram.programId,
-  }),
-  // Initialize with authorities
-  StakeProgram.initialize({
-    stakePubkey: stakeAccount.publicKey,
-    authorized: {
-      staker: payer.publicKey,
-      withdrawer: payer.publicKey,
-    },
-    lockup: {
-      unixTimestamp: 0,
-      epoch: 0,
-      custodian: payer.publicKey,
-    },
-  })
-);
-
-const signature = await sendAndConfirmTransaction(connection, tx, [
-  payer,
-  stakeAccount,
-]);
-console.log('Initialized stake account:', stakeAccount.publicKey.toBase58());
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { 
-  createSolanaRpc,
-  createKeyPairSignerFromBytes,
-  getCreateAccountInstruction,
-  lamports,
-  pipe,
-  createTransactionMessage,
-  setTransactionMessageFeePayer,
-  appendTransactionMessageInstructions,
-  signTransactionMessageWithSigners,
-  sendAndConfirmTransactionFactory,
-} from '@solana/kit';
-import {
-  getInitializeInstruction,
-  STAKE_ACCOUNT_SIZE,
-  STAKE_PROGRAM_ADDRESS,
-} from '@solana-program/stake';
-
-const rpc = createSolanaRpc('https://api.devnet.solana.com');
-const payer = await createKeyPairSignerFromBytes(/* your keypair bytes */);
-const stakeAccount = await generateKeyPairSigner();
-
-const rentExempt = await rpc.getMinimumBalanceForRentExemption(STAKE_ACCOUNT_SIZE).send();
-
-const instructions = [
-  getCreateAccountInstruction({
-    payer,
-    newAccount: stakeAccount,
-    lamports: lamports(rentExempt + 5_000_000_000n),
-    space: STAKE_ACCOUNT_SIZE,
-    programAddress: STAKE_PROGRAM_ADDRESS,
-  }),
-  getInitializeInstruction({
-    stakeAccount: stakeAccount.address,
-    authorized: {
-      staker: payer.address,
-      withdrawer: payer.address,
-    },
-    lockup: {
-      unixTimestamp: 0n,
-      epoch: 0n,
-      custodian: payer.address,
-    },
-  }),
-];
-
-// Build and send transaction...
-```
 
 ### Rust
 
@@ -250,5 +142,3 @@ solana create-stake-account stake-keypair.json 5 \
 |-------|-------|
 | `InvalidAccountData` | Account already initialized |
 | `InsufficientFunds` | Account balance below rent-exempt minimum |
-
----

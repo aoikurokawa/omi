@@ -1,0 +1,181 @@
+---
+title: SetFundingAuthority
+description: Set or remove deposit/withdrawal authority restrictions.
+---
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Instruction Index | 14 |
+| Required Authority | Manager |
+
+The `SetFundingAuthority` instruction allows the manager to set or remove authorities that control deposits and withdrawals. When set, operations require an additional signature.
+
+## Accounts
+
+| Index | Name | Writable | Signer | Description |
+|-------|------|----------|--------|-------------|
+| 0 | Stake Pool | ✅ | ❌ | Stake pool account |
+| 1 | Manager | ❌ | ✅ | Pool manager |
+| 2 | (Optional) New Authority | ❌ | ❌ | New authority (omit to remove) |
+
+## Arguments
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `funding_type` | FundingType | Type of authority to set |
+
+```rust
+pub enum FundingType {
+    /// Controls stake deposits
+    StakeDeposit,
+    /// Controls SOL deposits
+    SolDeposit,
+    /// Controls SOL withdrawals
+    SolWithdraw,
+}
+```
+
+## Behavior
+
+1. Validates manager signature
+2. If new authority provided:
+   - Sets the funding authority to new pubkey
+3. If no new authority (None):
+   - Removes the restriction (anyone can use the operation)
+
+## Authority Effects
+
+| Authority | When Set | When Not Set |
+|-----------|----------|--------------|
+| `StakeDeposit` | Authority must sign DepositStake | Anyone can deposit stake |
+| `SolDeposit` | Authority must sign DepositSol | Anyone can deposit SOL |
+| `SolWithdraw` | Authority must sign WithdrawSol | Anyone can withdraw SOL |
+
+## Examples
+
+### Rust
+
+```rust
+use spl_stake_pool::instruction::{set_funding_authority, FundingType};
+
+// Set SOL deposit authority
+fn restrict_sol_deposits(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+    deposit_authority: &Pubkey,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ix = set_funding_authority(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        Some(deposit_authority),
+        FundingType::SolDeposit,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    println!("SOL deposits now require authority signature");
+    Ok(())
+}
+
+// Remove restriction
+fn allow_public_deposits(
+    client: &RpcClient,
+    stake_pool: &Pubkey,
+    manager: &Keypair,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ix = set_funding_authority(
+        &spl_stake_pool::id(),
+        stake_pool,
+        &manager.pubkey(),
+        None, // Remove restriction
+        FundingType::SolDeposit,
+    );
+    
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&manager.pubkey()),
+        &[manager],
+        client.get_latest_blockhash()?,
+    );
+    
+    client.send_and_confirm_transaction(&tx)?;
+    println!("SOL deposits are now public");
+    Ok(())
+}
+```
+
+### CLI
+
+```bash
+# Set SOL deposit authority
+spl-stake-pool set-funding-authority <POOL_ADDRESS> sol-deposit \
+    --new-authority <AUTHORITY_PUBKEY>
+
+# Remove SOL deposit restriction
+spl-stake-pool set-funding-authority <POOL_ADDRESS> sol-deposit --unset
+
+# Set stake deposit authority
+spl-stake-pool set-funding-authority <POOL_ADDRESS> stake-deposit \
+    --new-authority <AUTHORITY_PUBKEY>
+
+# Set SOL withdraw authority
+spl-stake-pool set-funding-authority <POOL_ADDRESS> sol-withdraw \
+    --new-authority <AUTHORITY_PUBKEY>
+```
+
+## Use Cases
+
+### Private Pools
+
+```typescript
+// Only whitelisted users can deposit
+const setPrivate = await setFundingAuthority(
+    stakePool,
+    manager,
+    FundingType.SolDeposit,
+    whitelistAuthority,
+);
+
+// Whitelist authority signs deposits
+const depositIx = depositSolWithAuthority(
+    stakePool,
+    whitelistAuthority, // Must sign
+    user,
+    amount,
+);
+```
+
+### Controlled Withdrawals
+
+```typescript
+// Require approval for SOL withdrawals
+await setFundingAuthority(
+    stakePool,
+    manager,
+    FundingType.SolWithdraw,
+    withdrawalApprover,
+);
+```
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| `SignatureMissing` | Manager didn't sign |
+| `WrongManager` | Signer is not manager |
+
+## Security Considerations
+
+- **Private Pools**: Useful for institutional or DAO-controlled pools
+- **Withdrawal Control**: Can prevent bank runs or enforce lockups
+- **Key Management**: Authority keys must be securely managed

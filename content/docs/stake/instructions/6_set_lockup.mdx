@@ -10,7 +10,8 @@ description: Modify the lockup parameters of a stake account..
 | Instruction Index | 6 |
 | Estimated CU | ~9,300 |
 
-The `SetLockup` instruction modifies the lockup configuration of a stake account. Lockups restrict when SOL can be withdrawn.
+The `SetLockup` instruction modifies the lockup configuration of a stake account.
+Lockups restrict when SOL can be withdrawn.
 
 ## Accounts
 
@@ -52,70 +53,6 @@ A lockup prevents withdrawal until **both** conditions are met:
 Setting either to 0 effectively disables that check.
 
 ## Examples
-
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-const stakeAccountPubkey = new PublicKey('...');
-const authority = /* Keypair - withdraw authority or custodian */;
-
-// Set lockup for 30 days from now
-const thirtyDaysFromNow = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
-
-const setLockupIx = StakeProgram.setLockup({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: authority.publicKey,
-  lockup: {
-    unixTimestamp: thirtyDaysFromNow,
-    epoch: 0, // No epoch restriction
-    custodian: authority.publicKey, // Set self as custodian
-  },
-});
-
-const tx = new Transaction().add(setLockupIx);
-await sendAndConfirmTransaction(connection, tx, [payer, authority]);
-```
-
-### Remove Lockup
-
-```typescript
-// Remove all lockup restrictions
-const removeLockupIx = StakeProgram.setLockup({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: custodian.publicKey, // Must be current custodian
-  lockup: {
-    unixTimestamp: 0,
-    epoch: 0,
-    custodian: PublicKey.default, // Or any address
-  },
-});
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { getSetLockupInstruction } from '@solana-program/stake';
-
-const setLockupIx = getSetLockupInstruction({
-  stakeAccount: stakeAccountAddress,
-  authority: authoritySigner,
-  lockupArgs: {
-    unixTimestamp: BigInt(thirtyDaysFromNow),
-    epoch: null, // Don't change
-    custodian: null, // Don't change
-  },
-});
-```
 
 ### Rust
 
@@ -183,5 +120,3 @@ solana stake-set-lockup <STAKE_ACCOUNT_ADDRESS> \
   --lockup-epoch 0 \
   --custodian <CURRENT_CUSTODIAN_KEYPAIR>
 ```
-
----

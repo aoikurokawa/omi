@@ -10,7 +10,8 @@ description: Withdraw SOL from a stake account.
 | Instruction Index | 4 |
 | Estimated CU | ~7,300 |
 
-The `Withdraw` instruction transfers SOL from a stake account to a recipient. The amount that can be withdrawn depends on the stake account's state and lockup status.
+The `Withdraw` instruction transfers SOL from a stake account to a recipient.
+The amount that can be withdrawn depends on the stake account's state and lockup status.
 
 ## Accounts
 
@@ -72,62 +73,6 @@ async function getWithdrawableAmount(
 ```
 
 ## Examples
-
-### TypeScript (web3.js v1)
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  StakeProgram,
-  LAMPORTS_PER_SOL,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
-
-const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-
-const stakeAccountPubkey = new PublicKey('...');
-const withdrawAuthority = /* Keypair */;
-const recipientPubkey = new PublicKey('...');
-
-// Withdraw 2 SOL
-const withdrawIx = StakeProgram.withdraw({
-  stakePubkey: stakeAccountPubkey,
-  authorizedPubkey: withdrawAuthority.publicKey,
-  toPubkey: recipientPubkey,
-  lamports: 2 * LAMPORTS_PER_SOL,
-});
-
-const tx = new Transaction().add(withdrawIx);
-
-const signature = await sendAndConfirmTransaction(connection, tx, [
-  payer,
-  withdrawAuthority,
-]);
-
-console.log('Withdrawal complete:', signature);
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { getWithdrawInstruction } from '@solana-program/stake';
-import { 
-  CLOCK_SYSVAR_ADDRESS, 
-  STAKE_HISTORY_SYSVAR_ADDRESS,
-  lamports,
-} from '@solana/kit';
-
-const withdrawIx = getWithdrawInstruction({
-  stakeAccount: stakeAccountAddress,
-  recipient: recipientAddress,
-  withdrawAuthority: withdrawAuthoritySigner,
-  lamports: lamports(2_000_000_000n), // 2 SOL
-  clock: CLOCK_SYSVAR_ADDRESS,
-  stakeHistory: STAKE_HISTORY_SYSVAR_ADDRESS,
-});
-```
 
 ### Rust
 

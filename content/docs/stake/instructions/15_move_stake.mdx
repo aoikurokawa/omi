@@ -10,7 +10,8 @@ description: Transfer delegated stake between two stake accounts.
 | Instruction Index | 16 |
 | Estimated CU | ~21,700 |
 
-The `MoveStake` instruction transfers a portion of delegated stake from one account to another. Both accounts must be delegated to the same validator.
+The `MoveStake` instruction transfers a portion of delegated stake from one account to another.
+Both accounts must be delegated to the same validator.
 
 ## Accounts
 
@@ -44,67 +45,6 @@ The `MoveStake` instruction transfers a portion of delegated stake from one acco
 | Transfers delegation | Yes | Creates new delegation |
 
 ## Examples
-
-### TypeScript
-
-```typescript
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-  SYSVAR_CLOCK_PUBKEY,
-} from '@solana/web3.js';
-
-const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
-
-function createMoveStakeInstruction(
-  sourceStake: PublicKey,
-  destinationStake: PublicKey,
-  stakeAuthority: PublicKey,
-  lamports: bigint,
-): TransactionInstruction {
-  // Instruction index 16 + u64 lamports
-  const data = Buffer.alloc(4 + 8);
-  data.writeUInt32LE(16, 0);
-  data.writeBigUInt64LE(lamports, 4);
-
-  return new TransactionInstruction({
-    keys: [
-      { pubkey: sourceStake, isSigner: false, isWritable: true },
-      { pubkey: destinationStake, isSigner: false, isWritable: true },
-      { pubkey: stakeAuthority, isSigner: true, isWritable: false },
-    ],
-    programId: STAKE_PROGRAM_ID,
-    data,
-  });
-}
-
-// Usage
-const moveIx = createMoveStakeInstruction(
-  sourceStakePubkey,
-  destinationStakePubkey,
-  stakeAuthority.publicKey,
-  BigInt(2_000_000_000), // 2 SOL worth of stake
-);
-
-const tx = new Transaction().add(moveIx);
-await sendAndConfirmTransaction(connection, tx, [payer, stakeAuthority]);
-```
-
-### TypeScript (@solana-program/stake)
-
-```typescript
-import { getMoveStakeInstruction } from '@solana-program/stake';
-import { lamports } from '@solana/kit';
-
-const moveStakeIx = getMoveStakeInstruction({
-  sourceStakeAccount: sourceStakeAddress,
-  destinationStakeAccount: destinationStakeAddress,
-  stakeAuthority: stakeAuthoritySigner,
-  lamports: lamports(2_000_000_000n),
-});
-```
 
 ### Rust
 
