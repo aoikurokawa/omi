@@ -119,40 +119,6 @@ fn add_validator(
 }
 ```
 
-### TypeScript
-
-```typescript
-import { addValidatorToPool } from '@solana/spl-stake-pool';
-
-async function addValidator(
-    connection: Connection,
-    stakePool: PublicKey,
-    staker: Keypair,
-    voteAccount: PublicKey,
-) {
-    const stakePoolAccount = await getStakePoolAccount(connection, stakePool);
-    
-    const instruction = addValidatorToPool(
-        STAKE_POOL_PROGRAM_ID,
-        stakePool,
-        staker.publicKey,
-        staker.publicKey, // funder
-        stakePoolAccount.account.data.validatorList,
-        voteAccount,
-    );
-    
-    const transaction = new Transaction().add(instruction);
-    
-    const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction,
-        [staker],
-    );
-    
-    console.log('Added validator:', signature);
-}
-```
-
 ### CLI
 
 ```bash
