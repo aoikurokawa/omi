@@ -109,45 +109,6 @@ fn deposit_sol_to_pool(
 }
 ```
 
-### TypeScript
-
-```typescript
-import { depositSol } from '@solana/spl-stake-pool';
-
-async function deposit(
-    connection: Connection,
-    stakePool: PublicKey,
-    user: Keypair,
-    userTokenAccount: PublicKey,
-    amount: number, // in SOL
-) {
-    const poolData = await getStakePoolAccount(connection, stakePool);
-    const lamports = amount * LAMPORTS_PER_SOL;
-    
-    const instruction = depositSol(
-        STAKE_POOL_PROGRAM_ID,
-        stakePool,
-        poolData.account.data.reserveStake,
-        user.publicKey,
-        userTokenAccount,
-        poolData.account.data.managerFeeAccount,
-        poolData.account.data.managerFeeAccount, // referrer
-        poolData.account.data.poolMint,
-        lamports,
-    );
-    
-    const transaction = new Transaction().add(instruction);
-    
-    const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction,
-        [user],
-    );
-    
-    console.log('Deposit complete:', signature);
-}
-```
-
 ### CLI
 
 ```bash

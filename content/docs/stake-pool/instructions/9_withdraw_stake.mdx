@@ -132,65 +132,6 @@ fn withdraw_stake_from_pool(
 }
 ```
 
-### TypeScript
-
-```typescript
-import { withdrawStake } from '@solana/spl-stake-pool';
-
-async function withdraw(
-    connection: Connection,
-    stakePool: PublicKey,
-    user: Keypair,
-    userTokenAccount: PublicKey,
-    poolTokens: bigint,
-) {
-    const poolData = await getStakePoolAccount(connection, stakePool);
-    
-    // Create new stake account
-    const userStake = Keypair.generate();
-    const rent = await connection.getMinimumBalanceForRentExemption(200);
-    
-    const createStakeIx = SystemProgram.createAccount({
-        fromPubkey: user.publicKey,
-        newAccountPubkey: userStake.publicKey,
-        lamports: rent,
-        space: 200,
-        programId: StakeProgram.programId,
-    });
-    
-    // Choose a validator to withdraw from
-    const validatorList = await getValidatorList(
-        connection,
-        poolData.account.data.validatorList
-    );
-    const validator = validatorList.validators[0]; // or preferred
-    
-    const withdrawIx = withdrawStake(
-        STAKE_POOL_PROGRAM_ID,
-        stakePool,
-        poolData.account.data.validatorList,
-        validator.voteAccountAddress,
-        userStake.publicKey,
-        user.publicKey,
-        userTokenAccount,
-        poolTokens,
-    );
-    
-    const transaction = new Transaction()
-        .add(createStakeIx)
-        .add(withdrawIx);
-    
-    const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction,
-        [user, userStake],
-    );
-    
-    console.log('Withdrawal complete:', signature);
-    console.log('New stake account:', userStake.publicKey.toBase58());
-}
-```
-
 ### CLI
 
 ```bash

@@ -108,42 +108,6 @@ fn withdraw_sol_from_pool(
 }
 ```
 
-### TypeScript
-
-```typescript
-import { withdrawSol } from '@solana/spl-stake-pool';
-
-async function withdraw(
-    connection: Connection,
-    stakePool: PublicKey,
-    user: Keypair,
-    userTokenAccount: PublicKey,
-    poolTokens: bigint,
-) {
-    const poolData = await getStakePoolAccount(connection, stakePool);
-    
-    const instruction = withdrawSol(
-        STAKE_POOL_PROGRAM_ID,
-        stakePool,
-        user.publicKey,
-        userTokenAccount,
-        poolData.account.data.reserveStake,
-        user.publicKey, // SOL destination
-        poolTokens,
-    );
-    
-    const transaction = new Transaction().add(instruction);
-    
-    const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction,
-        [user],
-    );
-    
-    console.log('Withdrawal complete:', signature);
-}
-```
-
 ### CLI
 
 ```bash
